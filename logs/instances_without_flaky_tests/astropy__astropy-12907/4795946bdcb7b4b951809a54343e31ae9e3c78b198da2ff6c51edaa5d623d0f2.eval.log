@@ -1,0 +1,131 @@
+2024-07-03 10:45:33,992 - INFO - Environment image sweb.env.x86_64.428468730904ff6b4232aa:latest found for astropy__astropy-12907
+Building instance image sweb.eval.x86_64.astropy__astropy-12907:latest for astropy__astropy-12907
+2024-07-03 10:45:33,994 - INFO - Image sweb.eval.x86_64.astropy__astropy-12907:latest already exists, skipping build.
+2024-07-03 10:45:33,994 - INFO - Creating container for astropy__astropy-12907...
+2024-07-03 10:45:35,360 - INFO - Container for astropy__astropy-12907 created: fa1493c11fb1025a368fa32a079e1b0d76fad78379636d0417075427358fa95c
+2024-07-03 10:45:37,437 - INFO - Container for astropy__astropy-12907 started: fa1493c11fb1025a368fa32a079e1b0d76fad78379636d0417075427358fa95c
+2024-07-03 10:45:37,437 - INFO - Intermediate patch for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_151696/model_name_managed_by_server/astropy__astropy-12907/patch.diff, now applying to container...
+2024-07-03 10:45:37,688 - INFO - >>>>> Applied Patch:
+Checking patch astropy/modeling/core.py...
+Applied patch astropy/modeling/core.py cleanly.
+
+2024-07-03 10:45:38,454 - INFO - Git diff before:
+diff --git a/astropy/modeling/core.py b/astropy/modeling/core.py
+index da4352cb0c..3e3ec43940 100644
+--- a/astropy/modeling/core.py
++++ b/astropy/modeling/core.py
+@@ -805,13 +805,33 @@ class Model(metaclass=_ModelMeta):
+ 
+         return self.__class__.n_outputs
+ 
+-    def _calculate_separability_matrix(self):
+-        """
+-        This is a hook which customises the behavior of modeling.separable.
++def _calculate_separability_matrix(self):
++    left_seps = self.left._calculate_separability_matrix()
++    right_seps = self.right._calculate_separability_matrix()
+ 
+-        This allows complex subclasses to customise the separability matrix.
+-        If it returns `NotImplemented` the default behavior is used.
+-        """
++    if left_seps is NotImplemented or right_seps is NotImplemented:
++        return NotImplemented
++
++    if self.op == '&':
++        return block_diag(left_seps, right_seps)
++    elif self.op == '|':
++        left_inputs = self.left.n_inputs
++        right_inputs = self.right.n_inputs
++        new_seps = np.zeros((self.n_outputs, self.n_inputs), dtype=bool)
++        new_seps[:, :left_inputs] = left_seps
++        new_seps[:, left_inputs:] = right_seps
++        return new_seps
++    elif self.op in ['+', '-', '*', '/', '**']:
++        return left_seps & right_seps
++    elif self.op == 'fix_inputs':
++        fixed_inputs = list(self.right.keys())
++        fixed_indices = [self.inputs.index(inp) if isinstance(inp, str) else inp for inp in fixed_inputs]
++        mask = np.ones((self.n_inputs,), dtype=bool)
++        mask[fixed_indices] = False
++        result = np.zeros((self.n_outputs, self.n_inputs), dtype=bool)
++        result[:, mask] = left_seps[:, mask]
++        return result
++    else:
+         return NotImplemented
+ 
+     def _initialize_unit_support(self):
+diff --git a/pyproject.toml b/pyproject.toml
+index 3364d30740..02dddbe713 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,5 +1,5 @@
+ [build-system]
+-requires = ["setuptools",
++requires = ["setuptools==68.0.0",
+             "setuptools_scm>=6.2",
+             "wheel",
+             "cython==0.29.22",
+2024-07-03 10:45:38,457 - INFO - Eval script for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_151696/model_name_managed_by_server/astropy__astropy-12907/patch.diff, now applying to container...
+2024-07-03 10:45:52,066 - INFO - Test output for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_151696/model_name_managed_by_server/astropy__astropy-12907/test_output.txt
+2024-07-03 10:45:52,122 - INFO - Git diff after:
+diff --git a/astropy/modeling/core.py b/astropy/modeling/core.py
+index da4352cb0c..3e3ec43940 100644
+--- a/astropy/modeling/core.py
++++ b/astropy/modeling/core.py
+@@ -805,13 +805,33 @@ class Model(metaclass=_ModelMeta):
+ 
+         return self.__class__.n_outputs
+ 
+-    def _calculate_separability_matrix(self):
+-        """
+-        This is a hook which customises the behavior of modeling.separable.
++def _calculate_separability_matrix(self):
++    left_seps = self.left._calculate_separability_matrix()
++    right_seps = self.right._calculate_separability_matrix()
+ 
+-        This allows complex subclasses to customise the separability matrix.
+-        If it returns `NotImplemented` the default behavior is used.
+-        """
++    if left_seps is NotImplemented or right_seps is NotImplemented:
++        return NotImplemented
++
++    if self.op == '&':
++        return block_diag(left_seps, right_seps)
++    elif self.op == '|':
++        left_inputs = self.left.n_inputs
++        right_inputs = self.right.n_inputs
++        new_seps = np.zeros((self.n_outputs, self.n_inputs), dtype=bool)
++        new_seps[:, :left_inputs] = left_seps
++        new_seps[:, left_inputs:] = right_seps
++        return new_seps
++    elif self.op in ['+', '-', '*', '/', '**']:
++        return left_seps & right_seps
++    elif self.op == 'fix_inputs':
++        fixed_inputs = list(self.right.keys())
++        fixed_indices = [self.inputs.index(inp) if isinstance(inp, str) else inp for inp in fixed_inputs]
++        mask = np.ones((self.n_inputs,), dtype=bool)
++        mask[fixed_indices] = False
++        result = np.zeros((self.n_outputs, self.n_inputs), dtype=bool)
++        result[:, mask] = left_seps[:, mask]
++        return result
++    else:
+         return NotImplemented
+ 
+     def _initialize_unit_support(self):
+diff --git a/pyproject.toml b/pyproject.toml
+index 3364d30740..02dddbe713 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,5 +1,5 @@
+ [build-system]
+-requires = ["setuptools",
++requires = ["setuptools==68.0.0",
+             "setuptools_scm>=6.2",
+             "wheel",
+             "cython==0.29.22",
+2024-07-03 10:45:52,123 - INFO - Grading answer for astropy__astropy-12907...
+2024-07-03 10:45:52,124 - INFO - report: {'astropy__astropy-12907': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['astropy/modeling/tests/test_separable.py::test_separable[compound_model6-result6]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model9-result9]']}, 'PASS_TO_PASS': {'success': [], 'failure': ['astropy/modeling/tests/test_separable.py::test_coord_matrix', 'astropy/modeling/tests/test_separable.py::test_cdot', 'astropy/modeling/tests/test_separable.py::test_cstack', 'astropy/modeling/tests/test_separable.py::test_arith_oper', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model0-result0]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model1-result1]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model2-result2]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model3-result3]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model4-result4]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model5-result5]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model7-result7]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model8-result8]', 'astropy/modeling/tests/test_separable.py::test_custom_model_separable']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for astropy__astropy-12907: resolved: False
+2024-07-03 10:45:52,125 - INFO - Attempting to stop container sweb.eval.astropy__astropy-12907.evaluation_151696...
+2024-07-03 10:45:58,802 - INFO - Attempting to remove container sweb.eval.astropy__astropy-12907.evaluation_151696...
+2024-07-03 10:45:59,236 - INFO - Container sweb.eval.astropy__astropy-12907.evaluation_151696 removed.

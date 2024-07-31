@@ -1,0 +1,283 @@
+2024-07-03 16:28:03,477 - INFO - Environment image sweb.env.x86_64.297af196949a2a635bce66:latest found for django__django-13925
+Building instance image sweb.eval.x86_64.django__django-13925:latest for django__django-13925
+2024-07-03 16:28:03,479 - INFO - Image sweb.eval.x86_64.django__django-13925:latest already exists, skipping build.
+2024-07-03 16:28:03,479 - INFO - Creating container for django__django-13925...
+2024-07-03 16:28:04,833 - INFO - Container for django__django-13925 created: b1d575ae603bb9d78396b40d4a653c241d914f9c3cde298344995b514def2fee
+2024-07-03 16:29:07,055 - INFO - Container for django__django-13925 started: b1d575ae603bb9d78396b40d4a653c241d914f9c3cde298344995b514def2fee
+2024-07-03 16:29:07,063 - INFO - Intermediate patch for django__django-13925 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_178273/model_name_managed_by_server/django__django-13925/patch.diff, now applying to container...
+2024-07-03 16:29:08,111 - INFO - >>>>> Applied Patch:
+Checking patch django/db/models/base.py...
+Applied patch django/db/models/base.py cleanly.
+
+2024-07-03 16:29:09,435 - INFO - Git diff before:
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 4038859cfa..013753d121 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -417,75 +417,68 @@ class Model(metaclass=ModelBase):
+         # Set up the storage for instance state
+         self._state = ModelState()
+ 
+-        # There is a rather weird disparity here; if kwargs, it's set, then args
+-        # overrides it. It should be one or the other; don't duplicate the work
+-        # The reason for the kwargs check is that standard iterator passes in by
+-        # args, and instantiation for iteration is 33% faster.
+-        if len(args) > len(opts.concrete_fields):
+-            # Daft, but matches old exception sans the err msg.
+-            raise IndexError("Number of args exceeds number of fields")
+-
+-        if not kwargs:
+-            fields_iter = iter(opts.concrete_fields)
+-            # The ordering of the zip calls matter - zip throws StopIteration
+-            # when an iter throws it. So if the first iter throws it, the second
+-            # is *not* consumed. We rely on this, so don't change the order
+-            # without changing the logic.
+-            for val, field in zip(args, fields_iter):
+-                if val is _DEFERRED:
+-                    continue
+-                _setattr(self, field.attname, val)
+-        else:
+-            # Slower, kwargs-ready version.
+-            fields_iter = iter(opts.fields)
++        if kwargs:
++            fields = opts.concrete_fields
++            for field in fields:
++                if field.attname in kwargs:
++                    _setattr(self, field.attname, kwargs.pop(field.attname))
++
++            fields_iter = iter(fields)
+             for val, field in zip(args, fields_iter):
+                 if val is _DEFERRED:
+                     continue
+                 _setattr(self, field.attname, val)
+-                kwargs.pop(field.name, None)
++    else:
++        # Slower, kwargs-ready version.
++        fields_iter = iter(opts.fields)
++        for val, field in zip(args, fields_iter):
++            if val is _DEFERRED:
++                continue
++            _setattr(self, field.attname, val)
++            kwargs.pop(field.name, None)
+ 
+-        # Now we're left with the unprocessed fields that *must* come from
+-        # keywords, or default.
++    # Now we're left with the unprocessed fields that *must* come from
++    # keywords, or default.
+ 
+-        for field in fields_iter:
+-            is_related_object = False
+-            # Virtual field
+-            if field.attname not in kwargs and field.column is None:
+-                continue
+-            if kwargs:
+-                if isinstance(field.remote_field, ForeignObjectRel):
+-                    try:
+-                        # Assume object instance was passed in.
+-                        rel_obj = kwargs.pop(field.name)
+-                        is_related_object = True
+-                    except KeyError:
+-                        try:
+-                            # Object instance wasn't passed in -- must be an ID.
+-                            val = kwargs.pop(field.attname)
+-                        except KeyError:
+-                            val = field.get_default()
+-                else:
++    for field in fields_iter:
++        is_related_object = False
++        # Virtual field
++        if field.attname not in kwargs and field.column is None:
++            continue
++        if kwargs:
++            if isinstance(field.remote_field, ForeignObjectRel):
++                try:
++                    # Assume object instance was passed in.
++                    rel_obj = kwargs.pop(field.name)
++                    is_related_object = True
++                except KeyError:
+                     try:
++                        # Object instance wasn't passed in -- must be an ID.
+                         val = kwargs.pop(field.attname)
+                     except KeyError:
+-                        # This is done with an exception rather than the
+-                        # default argument on pop because we don't want
+-                        # get_default() to be evaluated, and then not used.
+-                        # Refs #12057.
+                         val = field.get_default()
+             else:
+-                val = field.get_default()
+-
+-            if is_related_object:
+-                # If we are passed a related instance, set it using the
+-                # field.name instead of field.attname (e.g. "user" instead of
+-                # "user_id") so that the object gets properly cached (and type
+-                # checked) by the RelatedObjectDescriptor.
+-                if rel_obj is not _DEFERRED:
+-                    _setattr(self, field.name, rel_obj)
+-            else:
+-                if val is not _DEFERRED:
+-                    _setattr(self, field.attname, val)
++                try:
++                    val = kwargs.pop(field.attname)
++                except KeyError:
++                    # This is done with an exception rather than the
++                    # default argument on pop because we don't want
++                    # get_default() to be evaluated, and then not used.
++                    # Refs #12057.
++                    val = field.get_default()
++        else:
++            val = field.get_default()
++
++        if is_related_object:
++            # If we are passed a related instance, set it using the
++            # field.name instead of field.attname (e.g. "user" instead of
++            # "user_id") so that the object gets properly cached (and type
++            # checked) by the RelatedObjectDescriptor.
++            if rel_obj is not _DEFERRED:
++                _setattr(self, field.name, rel_obj)
++        else:
++            if val is not _DEFERRED:
++                _setattr(self, field.attname, val)
+ 
+         if kwargs:
+             property_names = opts._property_names
+2024-07-03 16:29:09,436 - INFO - Eval script for django__django-13925 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_178273/model_name_managed_by_server/django__django-13925/patch.diff, now applying to container...
+2024-07-03 16:29:22,187 - INFO - Test output for django__django-13925 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_178273/model_name_managed_by_server/django__django-13925/test_output.txt
+2024-07-03 16:29:22,276 - INFO - Git diff after:
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 4038859cfa..013753d121 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -417,75 +417,68 @@ class Model(metaclass=ModelBase):
+         # Set up the storage for instance state
+         self._state = ModelState()
+ 
+-        # There is a rather weird disparity here; if kwargs, it's set, then args
+-        # overrides it. It should be one or the other; don't duplicate the work
+-        # The reason for the kwargs check is that standard iterator passes in by
+-        # args, and instantiation for iteration is 33% faster.
+-        if len(args) > len(opts.concrete_fields):
+-            # Daft, but matches old exception sans the err msg.
+-            raise IndexError("Number of args exceeds number of fields")
+-
+-        if not kwargs:
+-            fields_iter = iter(opts.concrete_fields)
+-            # The ordering of the zip calls matter - zip throws StopIteration
+-            # when an iter throws it. So if the first iter throws it, the second
+-            # is *not* consumed. We rely on this, so don't change the order
+-            # without changing the logic.
+-            for val, field in zip(args, fields_iter):
+-                if val is _DEFERRED:
+-                    continue
+-                _setattr(self, field.attname, val)
+-        else:
+-            # Slower, kwargs-ready version.
+-            fields_iter = iter(opts.fields)
++        if kwargs:
++            fields = opts.concrete_fields
++            for field in fields:
++                if field.attname in kwargs:
++                    _setattr(self, field.attname, kwargs.pop(field.attname))
++
++            fields_iter = iter(fields)
+             for val, field in zip(args, fields_iter):
+                 if val is _DEFERRED:
+                     continue
+                 _setattr(self, field.attname, val)
+-                kwargs.pop(field.name, None)
++    else:
++        # Slower, kwargs-ready version.
++        fields_iter = iter(opts.fields)
++        for val, field in zip(args, fields_iter):
++            if val is _DEFERRED:
++                continue
++            _setattr(self, field.attname, val)
++            kwargs.pop(field.name, None)
+ 
+-        # Now we're left with the unprocessed fields that *must* come from
+-        # keywords, or default.
++    # Now we're left with the unprocessed fields that *must* come from
++    # keywords, or default.
+ 
+-        for field in fields_iter:
+-            is_related_object = False
+-            # Virtual field
+-            if field.attname not in kwargs and field.column is None:
+-                continue
+-            if kwargs:
+-                if isinstance(field.remote_field, ForeignObjectRel):
+-                    try:
+-                        # Assume object instance was passed in.
+-                        rel_obj = kwargs.pop(field.name)
+-                        is_related_object = True
+-                    except KeyError:
+-                        try:
+-                            # Object instance wasn't passed in -- must be an ID.
+-                            val = kwargs.pop(field.attname)
+-                        except KeyError:
+-                            val = field.get_default()
+-                else:
++    for field in fields_iter:
++        is_related_object = False
++        # Virtual field
++        if field.attname not in kwargs and field.column is None:
++            continue
++        if kwargs:
++            if isinstance(field.remote_field, ForeignObjectRel):
++                try:
++                    # Assume object instance was passed in.
++                    rel_obj = kwargs.pop(field.name)
++                    is_related_object = True
++                except KeyError:
+                     try:
++                        # Object instance wasn't passed in -- must be an ID.
+                         val = kwargs.pop(field.attname)
+                     except KeyError:
+-                        # This is done with an exception rather than the
+-                        # default argument on pop because we don't want
+-                        # get_default() to be evaluated, and then not used.
+-                        # Refs #12057.
+                         val = field.get_default()
+             else:
+-                val = field.get_default()
+-
+-            if is_related_object:
+-                # If we are passed a related instance, set it using the
+-                # field.name instead of field.attname (e.g. "user" instead of
+-                # "user_id") so that the object gets properly cached (and type
+-                # checked) by the RelatedObjectDescriptor.
+-                if rel_obj is not _DEFERRED:
+-                    _setattr(self, field.name, rel_obj)
+-            else:
+-                if val is not _DEFERRED:
+-                    _setattr(self, field.attname, val)
++                try:
++                    val = kwargs.pop(field.attname)
++                except KeyError:
++                    # This is done with an exception rather than the
++                    # default argument on pop because we don't want
++                    # get_default() to be evaluated, and then not used.
++                    # Refs #12057.
++                    val = field.get_default()
++        else:
++            val = field.get_default()
++
++        if is_related_object:
++            # If we are passed a related instance, set it using the
++            # field.name instead of field.attname (e.g. "user" instead of
++            # "user_id") so that the object gets properly cached (and type
++            # checked) by the RelatedObjectDescriptor.
++            if rel_obj is not _DEFERRED:
++                _setattr(self, field.name, rel_obj)
++        else:
++            if val is not _DEFERRED:
++                _setattr(self, field.attname, val)
+ 
+         if kwargs:
+             property_names = opts._property_names
+2024-07-03 16:29:22,276 - INFO - Grading answer for django__django-13925...
+2024-07-03 16:29:22,279 - INFO - report: {'django__django-13925': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_auto_created_inherited_pk (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_explicit_inherited_pk (check_framework.test_model_checks.ModelDefaultAutoFieldTests)']}, 'PASS_TO_PASS': {'success': [], 'failure': ['test_app_default_auto_field (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_auto_created_inherited_parent_link (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_auto_created_pk (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_default_auto_field_setting (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_explicit_inherited_parent_link (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_explicit_pk (check_framework.test_model_checks.ModelDefaultAutoFieldTests)', 'test_collision_abstract_model (check_framework.test_model_checks.IndexNameTests)', 'test_collision_across_apps (check_framework.test_model_checks.IndexNameTests)', 'test_collision_in_different_models (check_framework.test_model_checks.IndexNameTests)', 'test_collision_in_same_model (check_framework.test_model_checks.IndexNameTests)', 'test_no_collision_abstract_model_interpolation (check_framework.test_model_checks.IndexNameTests)', 'test_no_collision_across_apps_interpolation (check_framework.test_model_checks.IndexNameTests)', 'test_collision_abstract_model (check_framework.test_model_checks.ConstraintNameTests)', 'test_collision_across_apps (check_framework.test_model_checks.ConstraintNameTests)', 'test_collision_in_different_models (check_framework.test_model_checks.ConstraintNameTests)', 'test_collision_in_same_model (check_framework.test_model_checks.ConstraintNameTests)', 'test_no_collision_abstract_model_interpolation (check_framework.test_model_checks.ConstraintNameTests)', 'test_no_collision_across_apps_interpolation (check_framework.test_model_checks.ConstraintNameTests)', 'test_collision_across_apps (check_framework.test_model_checks.DuplicateDBTableTests)', 'test_collision_across_apps_database_routers_installed (check_framework.test_model_checks.DuplicateDBTableTests)', 'test_collision_in_same_app (check_framework.test_model_checks.DuplicateDBTableTests)', 'test_collision_in_same_app_database_routers_installed (check_framework.test_model_checks.DuplicateDBTableTests)', 'test_no_collision_for_proxy_models (check_framework.test_model_checks.DuplicateDBTableTests)', 'test_no_collision_for_unmanaged_models (check_framework.test_model_checks.DuplicateDBTableTests)']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for django__django-13925: resolved: False
+2024-07-03 16:29:22,279 - INFO - Attempting to stop container sweb.eval.django__django-13925.evaluation_178273...
+2024-07-03 16:29:26,376 - INFO - Attempting to remove container sweb.eval.django__django-13925.evaluation_178273...
+2024-07-03 16:29:26,652 - INFO - Container sweb.eval.django__django-13925.evaluation_178273 removed.

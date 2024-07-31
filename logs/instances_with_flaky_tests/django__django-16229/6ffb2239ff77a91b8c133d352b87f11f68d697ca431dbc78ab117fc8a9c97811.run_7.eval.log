@@ -1,0 +1,293 @@
+2024-07-10 00:51:33,704 - INFO - Environment image sweb.env.x86_64.a33dddf55cdff5d8e23374:latest found for django__django-16229
+Building instance image sweb.eval.x86_64.django__django-16229:latest for django__django-16229
+2024-07-10 00:51:33,708 - INFO - Image sweb.eval.x86_64.django__django-16229:latest already exists, skipping build.
+2024-07-10 00:51:33,709 - INFO - Creating container for django__django-16229...
+2024-07-10 00:51:33,787 - INFO - Container for django__django-16229 created: f451b0a40f19a074eaac17aa7f6b186b34c6d060a65295ae1020b150c8969602
+2024-07-10 00:51:34,076 - INFO - Container for django__django-16229 started: f451b0a40f19a074eaac17aa7f6b186b34c6d060a65295ae1020b150c8969602
+2024-07-10 00:51:34,076 - INFO - Intermediate patch for django__django-16229 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_263031/model_name_managed_by_server/django__django-16229/patch.diff, now applying to container...
+2024-07-10 00:51:34,574 - INFO - >>>>> Applied Patch:
+Checking patch django/contrib/admin/options.py...
+Applied patch django/contrib/admin/options.py cleanly.
+
+2024-07-10 00:52:15,042 - INFO - Git diff before:
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 6c6ee8cee7..dc45bb7349 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -66,6 +66,7 @@ from django.utils.translation import gettext as _
+ from django.utils.translation import ngettext
+ from django.views.decorators.csrf import csrf_protect
+ from django.views.generic import RedirectView
++from django.contrib.postgres.forms import SimpleArrayField
+ 
+ IS_POPUP_VAR = "_popup"
+ TO_FIELD_VAR = "_to_field"
+@@ -757,62 +758,70 @@ class ModelAdmin(BaseModelAdmin):
+     def _get_form_for_get_fields(self, request, obj):
+         return self.get_form(request, obj, fields=None)
+ 
+-    def get_form(self, request, obj=None, change=False, **kwargs):
+-        """
+-        Return a Form class for use in the admin add view. This is used by
+-        add_view and change_view.
+-        """
+-        if "fields" in kwargs:
+-            fields = kwargs.pop("fields")
+-        else:
+-            fields = flatten_fieldsets(self.get_fieldsets(request, obj))
+-        excluded = self.get_exclude(request, obj)
+-        exclude = [] if excluded is None else list(excluded)
+-        readonly_fields = self.get_readonly_fields(request, obj)
+-        exclude.extend(readonly_fields)
+-        # Exclude all fields if it's a change form and the user doesn't have
+-        # the change permission.
+-        if (
+-            change
+-            and hasattr(request, "user")
+-            and not self.has_change_permission(request, obj)
+-        ):
+-            exclude.extend(fields)
+-        if excluded is None and hasattr(self.form, "_meta") and self.form._meta.exclude:
+-            # Take the custom ModelForm's Meta.exclude into account only if the
+-            # ModelAdmin doesn't define its own.
+-            exclude.extend(self.form._meta.exclude)
+-        # if exclude is an empty list we pass None to be consistent with the
+-        # default on modelform_factory
+-        exclude = exclude or None
+-
+-        # Remove declared form fields which are in readonly_fields.
+-        new_attrs = dict.fromkeys(
+-            f for f in readonly_fields if f in self.form.declared_fields
++def get_form(self, request, obj=None, change=False, **kwargs):
++    """
++    Return a Form class for use in the admin add view. This is used by
++    add_view and change_view.
++    """
++    if "fields" in kwargs:
++        fields = kwargs.pop("fields")
++    else:
++        fields = flatten_fieldsets(self.get_fieldsets(request, obj))
++    excluded = self.get_exclude(request, obj)
++    exclude = [] if excluded is None else list(excluded)
++    readonly_fields = self.get_readonly_fields(request, obj)
++    exclude.extend(readonly_fields)
++    # Exclude all fields if it's a change form and the user doesn't have
++    # the change permission.
++    if (
++        change
++        and hasattr(request, "user")
++        and not self.has_change_permission(request, obj)
++    ):
++        exclude.extend(fields)
++    if excluded is None and hasattr(self.form, "_meta") and self.form._meta.exclude:
++        # Take the custom ModelForm's Meta.exclude into account only if the
++        # ModelAdmin doesn't define its own.
++        exclude.extend(self.form._meta.exclude)
++    # if exclude is an empty list we pass None to be consistent with the
++    # default on modelform_factory
++    exclude = exclude or None
++
++    # Remove declared form fields which are in readonly_fields.
++    new_attrs = dict.fromkeys(
++        f for f in readonly_fields if f in self.form.declared_fields
++    )
++    form = type(self.form.__name__, (self.form,), new_attrs)
++
++    defaults = {
++        "form": form,
++        "fields": fields,
++        "exclude": exclude,
++        "formfield_callback": partial(self.formfield_for_dbfield, request=request),
++        **kwargs,
++    }
++
++    if defaults["fields"] is None and not modelform_defines_fields(
++        defaults["form"]
++    ):
++        defaults["fields"] = forms.ALL_FIELDS
++
++    try:
++        FormClass = modelform_factory(self.model, **defaults)
++    except FieldError as e:
++        raise FieldError(
++            "%s. Check fields/fieldsets/exclude attributes of class %s."
++            % (e, self.__class__.__name__)
+         )
+-        form = type(self.form.__name__, (self.form,), new_attrs)
+-
+-        defaults = {
+-            "form": form,
+-            "fields": fields,
+-            "exclude": exclude,
+-            "formfield_callback": partial(self.formfield_for_dbfield, request=request),
+-            **kwargs,
+-        }
+-
+-        if defaults["fields"] is None and not modelform_defines_fields(
+-            defaults["form"]
+-        ):
+-            defaults["fields"] = forms.ALL_FIELDS
+ 
+-        try:
+-            return modelform_factory(self.model, **defaults)
+-        except FieldError as e:
+-            raise FieldError(
+-                "%s. Check fields/fieldsets/exclude attributes of class %s."
+-                % (e, self.__class__.__name__)
+-            )
++    class NewFormClass(FormClass):
++        def __init__(self, *args, **kwargs):
++            super().__init__(*args, **kwargs)
++            for field_name in self.fields:
++                if isinstance(self.fields[field_name], SimpleArrayField):
++                    self.fields[field_name].show_hidden_initial = False
+ 
++    return NewFormClass
+     def get_changelist(self, request, **kwargs):
+         """
+         Return the ChangeList class for use on the changelist page.
+2024-07-10 00:52:15,043 - INFO - Eval script for django__django-16229 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_263031/model_name_managed_by_server/django__django-16229/patch.diff, now applying to container...
+2024-07-10 00:52:52,531 - INFO - Test output for django__django-16229 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_263031/model_name_managed_by_server/django__django-16229/test_output.txt
+2024-07-10 00:52:53,242 - INFO - Git diff after:
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 6c6ee8cee7..dc45bb7349 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -66,6 +66,7 @@ from django.utils.translation import gettext as _
+ from django.utils.translation import ngettext
+ from django.views.decorators.csrf import csrf_protect
+ from django.views.generic import RedirectView
++from django.contrib.postgres.forms import SimpleArrayField
+ 
+ IS_POPUP_VAR = "_popup"
+ TO_FIELD_VAR = "_to_field"
+@@ -757,62 +758,70 @@ class ModelAdmin(BaseModelAdmin):
+     def _get_form_for_get_fields(self, request, obj):
+         return self.get_form(request, obj, fields=None)
+ 
+-    def get_form(self, request, obj=None, change=False, **kwargs):
+-        """
+-        Return a Form class for use in the admin add view. This is used by
+-        add_view and change_view.
+-        """
+-        if "fields" in kwargs:
+-            fields = kwargs.pop("fields")
+-        else:
+-            fields = flatten_fieldsets(self.get_fieldsets(request, obj))
+-        excluded = self.get_exclude(request, obj)
+-        exclude = [] if excluded is None else list(excluded)
+-        readonly_fields = self.get_readonly_fields(request, obj)
+-        exclude.extend(readonly_fields)
+-        # Exclude all fields if it's a change form and the user doesn't have
+-        # the change permission.
+-        if (
+-            change
+-            and hasattr(request, "user")
+-            and not self.has_change_permission(request, obj)
+-        ):
+-            exclude.extend(fields)
+-        if excluded is None and hasattr(self.form, "_meta") and self.form._meta.exclude:
+-            # Take the custom ModelForm's Meta.exclude into account only if the
+-            # ModelAdmin doesn't define its own.
+-            exclude.extend(self.form._meta.exclude)
+-        # if exclude is an empty list we pass None to be consistent with the
+-        # default on modelform_factory
+-        exclude = exclude or None
+-
+-        # Remove declared form fields which are in readonly_fields.
+-        new_attrs = dict.fromkeys(
+-            f for f in readonly_fields if f in self.form.declared_fields
++def get_form(self, request, obj=None, change=False, **kwargs):
++    """
++    Return a Form class for use in the admin add view. This is used by
++    add_view and change_view.
++    """
++    if "fields" in kwargs:
++        fields = kwargs.pop("fields")
++    else:
++        fields = flatten_fieldsets(self.get_fieldsets(request, obj))
++    excluded = self.get_exclude(request, obj)
++    exclude = [] if excluded is None else list(excluded)
++    readonly_fields = self.get_readonly_fields(request, obj)
++    exclude.extend(readonly_fields)
++    # Exclude all fields if it's a change form and the user doesn't have
++    # the change permission.
++    if (
++        change
++        and hasattr(request, "user")
++        and not self.has_change_permission(request, obj)
++    ):
++        exclude.extend(fields)
++    if excluded is None and hasattr(self.form, "_meta") and self.form._meta.exclude:
++        # Take the custom ModelForm's Meta.exclude into account only if the
++        # ModelAdmin doesn't define its own.
++        exclude.extend(self.form._meta.exclude)
++    # if exclude is an empty list we pass None to be consistent with the
++    # default on modelform_factory
++    exclude = exclude or None
++
++    # Remove declared form fields which are in readonly_fields.
++    new_attrs = dict.fromkeys(
++        f for f in readonly_fields if f in self.form.declared_fields
++    )
++    form = type(self.form.__name__, (self.form,), new_attrs)
++
++    defaults = {
++        "form": form,
++        "fields": fields,
++        "exclude": exclude,
++        "formfield_callback": partial(self.formfield_for_dbfield, request=request),
++        **kwargs,
++    }
++
++    if defaults["fields"] is None and not modelform_defines_fields(
++        defaults["form"]
++    ):
++        defaults["fields"] = forms.ALL_FIELDS
++
++    try:
++        FormClass = modelform_factory(self.model, **defaults)
++    except FieldError as e:
++        raise FieldError(
++            "%s. Check fields/fieldsets/exclude attributes of class %s."
++            % (e, self.__class__.__name__)
+         )
+-        form = type(self.form.__name__, (self.form,), new_attrs)
+-
+-        defaults = {
+-            "form": form,
+-            "fields": fields,
+-            "exclude": exclude,
+-            "formfield_callback": partial(self.formfield_for_dbfield, request=request),
+-            **kwargs,
+-        }
+-
+-        if defaults["fields"] is None and not modelform_defines_fields(
+-            defaults["form"]
+-        ):
+-            defaults["fields"] = forms.ALL_FIELDS
+ 
+-        try:
+-            return modelform_factory(self.model, **defaults)
+-        except FieldError as e:
+-            raise FieldError(
+-                "%s. Check fields/fieldsets/exclude attributes of class %s."
+-                % (e, self.__class__.__name__)
+-            )
++    class NewFormClass(FormClass):
++        def __init__(self, *args, **kwargs):
++            super().__init__(*args, **kwargs)
++            for field_name in self.fields:
++                if isinstance(self.fields[field_name], SimpleArrayField):
++                    self.fields[field_name].show_hidden_initial = False
+ 
++    return NewFormClass
+     def get_changelist(self, request, **kwargs):
+         """
+         Return the ChangeList class for use on the changelist page.
+2024-07-10 00:52:53,242 - INFO - Grading answer for django__django-16229...
+2024-07-10 00:52:53,249 - INFO - report: {'django__django-16229': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_callable_default_hidden_widget_value_not_overridden (forms_tests.tests.tests.ModelFormCallableModelDefault)']}, 'PASS_TO_PASS': {'success': [], 'failure': ['Test for issue 10405', "If a model's ManyToManyField has blank=True and is saved with no data,", 'test_m2m_field_exclusion (forms_tests.tests.tests.ManyToManyExclusionTestCase)', 'test_empty_field_char (forms_tests.tests.tests.Jinja2EmptyLabelTestCase)', 'test_empty_field_char_none (forms_tests.tests.tests.Jinja2EmptyLabelTestCase)', 'test_empty_field_integer (forms_tests.tests.tests.Jinja2EmptyLabelTestCase)', 'test_get_display_value_on_none (forms_tests.tests.tests.Jinja2EmptyLabelTestCase)', 'test_html_rendering_of_prepopulated_models (forms_tests.tests.tests.Jinja2EmptyLabelTestCase)', 'test_save_empty_label_forms (forms_tests.tests.tests.Jinja2EmptyLabelTestCase)', 'test_boundary_conditions (forms_tests.tests.tests.FormsModelTestCase)', 'test_formfield_initial (forms_tests.tests.tests.FormsModelTestCase)', 'test_unicode_filename (forms_tests.tests.tests.FormsModelTestCase)', 'test_empty_field_char (forms_tests.tests.tests.EmptyLabelTestCase)', 'test_empty_field_char_none (forms_tests.tests.tests.EmptyLabelTestCase)', 'test_empty_field_integer (forms_tests.tests.tests.EmptyLabelTestCase)', 'test_get_display_value_on_none (forms_tests.tests.tests.EmptyLabelTestCase)', 'test_html_rendering_of_prepopulated_models (forms_tests.tests.tests.EmptyLabelTestCase)', 'test_save_empty_label_forms (forms_tests.tests.tests.EmptyLabelTestCase)', 'The initial value for a callable default returning a queryset is the', 'Initial instances for model fields may also be instances (refs #7287)', "If a model's ForeignKey has blank=False and a default, no empty option"]}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for django__django-16229: resolved: False
+2024-07-10 00:52:53,249 - INFO - Attempting to stop container sweb.eval.django__django-16229.evaluation_263031...
+2024-07-10 00:52:54,135 - INFO - Attempting to remove container sweb.eval.django__django-16229.evaluation_263031...
+2024-07-10 00:52:54,189 - INFO - Container sweb.eval.django__django-16229.evaluation_263031 removed.

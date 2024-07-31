@@ -1,0 +1,253 @@
+2024-07-03 16:33:27,400 - INFO - Environment image sweb.env.x86_64.c795f4b88616b8462021ed:latest found for sympy__sympy-13915
+Building instance image sweb.eval.x86_64.sympy__sympy-13915:latest for sympy__sympy-13915
+2024-07-03 16:33:27,402 - INFO - Image sweb.eval.x86_64.sympy__sympy-13915:latest already exists, skipping build.
+2024-07-03 16:33:27,402 - INFO - Creating container for sympy__sympy-13915...
+2024-07-03 16:33:29,038 - INFO - Container for sympy__sympy-13915 created: 1c5dd33cd6b34a0bb07eb1f98727c938a96bdf47935118164b4ef26ea38a7202
+2024-07-03 16:33:30,500 - INFO - Container for sympy__sympy-13915 started: 1c5dd33cd6b34a0bb07eb1f98727c938a96bdf47935118164b4ef26ea38a7202
+2024-07-03 16:33:30,500 - INFO - Intermediate patch for sympy__sympy-13915 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_178653/model_name_managed_by_server/sympy__sympy-13915/patch.diff, now applying to container...
+2024-07-03 16:33:31,208 - INFO - >>>>> Applied Patch:
+Checking patch sympy/core/function.py...
+Applied patch sympy/core/function.py cleanly.
+
+2024-07-03 16:33:31,778 - INFO - Git diff before:
+diff --git a/sympy/core/function.py b/sympy/core/function.py
+index d14e2e2954..bfefbc0af6 100644
+--- a/sympy/core/function.py
++++ b/sympy/core/function.py
+@@ -1752,57 +1752,65 @@ class Subs(Expr):
+     z + f(0)*sin(1)
+ 
+     """
+-    def __new__(cls, expr, variables, point, **assumptions):
+-        from sympy import Symbol
+-        if not is_sequence(variables, Tuple):
+-            variables = [variables]
+-        variables = list(sympify(variables))
+-
+-        if list(uniq(variables)) != variables:
+-            repeated = [ v for v in set(variables) if variables.count(v) > 1 ]
+-            raise ValueError('cannot substitute expressions %s more than '
+-                             'once.' % repeated)
++def __new__(cls, expr, variables, point, **assumptions):
++    from sympy import Symbol, Limit
++    if not is_sequence(variables, Tuple):
++        variables = [variables]
++    variables = list(sympify(variables))
+ 
+-        point = Tuple(*(point if is_sequence(point, Tuple) else [point]))
++    if list(uniq(variables)) != variables:
++        repeated = [ v for v in set(variables) if variables.count(v) > 1 ]
++        raise ValueError('cannot substitute expressions %s more than '
++                         'once.' % repeated)
+ 
+-        if len(point) != len(variables):
+-            raise ValueError('Number of point values must be the same as '
+-                             'the number of variables.')
++    point = Tuple(*(point if is_sequence(point, Tuple) else [point]))
+ 
+-        expr = sympify(expr)
++    if len(point) != len(variables):
++        raise ValueError('Number of point values must be the same as '
++                         'the number of variables.')
+ 
+-        # use symbols with names equal to the point value (with preppended _)
+-        # to give a variable-independent expression
+-        pre = "_"
+-        pts = sorted(set(point), key=default_sort_key)
+-        from sympy.printing import StrPrinter
+-        class CustomStrPrinter(StrPrinter):
+-            def _print_Dummy(self, expr):
+-                return str(expr) + str(expr.dummy_index)
+-        def mystr(expr, **settings):
+-            p = CustomStrPrinter(settings)
+-            return p.doprint(expr)
+-        while 1:
+-            s_pts = {p: Symbol(pre + mystr(p)) for p in pts}
+-            reps = [(v, s_pts[p])
+-                for v, p in zip(variables, point)]
+-            # if any underscore-preppended symbol is already a free symbol
+-            # and is a variable with a different point value, then there
+-            # is a clash, e.g. _0 clashes in Subs(_0 + _1, (_0, _1), (1, 0))
+-            # because the new symbol that would be created is _1 but _1
+-            # is already mapped to 0 so __0 and __1 are used for the new
+-            # symbols
+-            if any(r in expr.free_symbols and
+-                   r in variables and
+-                   Symbol(pre + mystr(point[variables.index(r)])) != r
+-                   for _, r in reps):
+-                pre += "_"
+-                continue
+-            break
++    expr = sympify(expr)
+ 
+-        obj = Expr.__new__(cls, expr, Tuple(*variables), point)
+-        obj._expr = expr.subs(reps)
+-        return obj
++    # use symbols with names equal to the point value (with preppended _)
++    # to give a variable-independent expression
++    pre = "_"
++    pts = sorted(set(point), key=default_sort_key)
++    from sympy.printing import StrPrinter
++    class CustomStrPrinter(StrPrinter):
++        def _print_Dummy(self, expr):
++            return str(expr) + str(expr.dummy_index)
++    def mystr(expr, **settings):
++        p = CustomStrPrinter(settings)
++        return p.doprint(expr)
++    while 1:
++        s_pts = {p: Symbol(pre + mystr(p)) for p in pts}
++        reps = [(v, s_pts[p])
++            for v, p in zip(variables, point)]
++        # if any underscore-preppended symbol is already a free symbol
++        # and is a variable with a different point value, then there
++        # is a clash, e.g. _0 clashes in Subs(_0 + _1, (_0, _1), (1, 0))
++        # because the new symbol that would be created is _1 but _1
++        # is already mapped to 0 so __0 and __1 are used for the new
++        # symbols
++        if any(r in expr.free_symbols and
++               r in variables and
++               Symbol(pre + mystr(point[variables.index(r)])) != r
++               for _, r in reps):
++            pre += "_"
++            continue
++        break
++
++    obj = Expr.__new__(cls, expr, Tuple(*variables), point)
++    obj._expr = expr.subs(reps)
++
++    # Check if any substitution leads to an undefined expression
++    for v, p in zip(variables, point):
++        if obj._expr.subs(v, p).is_finite is False:
++            # Evaluate the limit instead
++            limit_expr = Limit(obj._expr, v, p)
++            obj._expr = limit_expr.doit()
++
++    return obj
+ 
+     def _eval_is_commutative(self):
+         return self.expr.is_commutative
+2024-07-03 16:33:31,779 - INFO - Eval script for sympy__sympy-13915 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_178653/model_name_managed_by_server/sympy__sympy-13915/patch.diff, now applying to container...
+2024-07-03 16:33:45,496 - INFO - Test output for sympy__sympy-13915 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_178653/model_name_managed_by_server/sympy__sympy-13915/test_output.txt
+2024-07-03 16:33:45,546 - INFO - Git diff after:
+diff --git a/sympy/core/function.py b/sympy/core/function.py
+index d14e2e2954..bfefbc0af6 100644
+--- a/sympy/core/function.py
++++ b/sympy/core/function.py
+@@ -1752,57 +1752,65 @@ class Subs(Expr):
+     z + f(0)*sin(1)
+ 
+     """
+-    def __new__(cls, expr, variables, point, **assumptions):
+-        from sympy import Symbol
+-        if not is_sequence(variables, Tuple):
+-            variables = [variables]
+-        variables = list(sympify(variables))
+-
+-        if list(uniq(variables)) != variables:
+-            repeated = [ v for v in set(variables) if variables.count(v) > 1 ]
+-            raise ValueError('cannot substitute expressions %s more than '
+-                             'once.' % repeated)
++def __new__(cls, expr, variables, point, **assumptions):
++    from sympy import Symbol, Limit
++    if not is_sequence(variables, Tuple):
++        variables = [variables]
++    variables = list(sympify(variables))
+ 
+-        point = Tuple(*(point if is_sequence(point, Tuple) else [point]))
++    if list(uniq(variables)) != variables:
++        repeated = [ v for v in set(variables) if variables.count(v) > 1 ]
++        raise ValueError('cannot substitute expressions %s more than '
++                         'once.' % repeated)
+ 
+-        if len(point) != len(variables):
+-            raise ValueError('Number of point values must be the same as '
+-                             'the number of variables.')
++    point = Tuple(*(point if is_sequence(point, Tuple) else [point]))
+ 
+-        expr = sympify(expr)
++    if len(point) != len(variables):
++        raise ValueError('Number of point values must be the same as '
++                         'the number of variables.')
+ 
+-        # use symbols with names equal to the point value (with preppended _)
+-        # to give a variable-independent expression
+-        pre = "_"
+-        pts = sorted(set(point), key=default_sort_key)
+-        from sympy.printing import StrPrinter
+-        class CustomStrPrinter(StrPrinter):
+-            def _print_Dummy(self, expr):
+-                return str(expr) + str(expr.dummy_index)
+-        def mystr(expr, **settings):
+-            p = CustomStrPrinter(settings)
+-            return p.doprint(expr)
+-        while 1:
+-            s_pts = {p: Symbol(pre + mystr(p)) for p in pts}
+-            reps = [(v, s_pts[p])
+-                for v, p in zip(variables, point)]
+-            # if any underscore-preppended symbol is already a free symbol
+-            # and is a variable with a different point value, then there
+-            # is a clash, e.g. _0 clashes in Subs(_0 + _1, (_0, _1), (1, 0))
+-            # because the new symbol that would be created is _1 but _1
+-            # is already mapped to 0 so __0 and __1 are used for the new
+-            # symbols
+-            if any(r in expr.free_symbols and
+-                   r in variables and
+-                   Symbol(pre + mystr(point[variables.index(r)])) != r
+-                   for _, r in reps):
+-                pre += "_"
+-                continue
+-            break
++    expr = sympify(expr)
+ 
+-        obj = Expr.__new__(cls, expr, Tuple(*variables), point)
+-        obj._expr = expr.subs(reps)
+-        return obj
++    # use symbols with names equal to the point value (with preppended _)
++    # to give a variable-independent expression
++    pre = "_"
++    pts = sorted(set(point), key=default_sort_key)
++    from sympy.printing import StrPrinter
++    class CustomStrPrinter(StrPrinter):
++        def _print_Dummy(self, expr):
++            return str(expr) + str(expr.dummy_index)
++    def mystr(expr, **settings):
++        p = CustomStrPrinter(settings)
++        return p.doprint(expr)
++    while 1:
++        s_pts = {p: Symbol(pre + mystr(p)) for p in pts}
++        reps = [(v, s_pts[p])
++            for v, p in zip(variables, point)]
++        # if any underscore-preppended symbol is already a free symbol
++        # and is a variable with a different point value, then there
++        # is a clash, e.g. _0 clashes in Subs(_0 + _1, (_0, _1), (1, 0))
++        # because the new symbol that would be created is _1 but _1
++        # is already mapped to 0 so __0 and __1 are used for the new
++        # symbols
++        if any(r in expr.free_symbols and
++               r in variables and
++               Symbol(pre + mystr(point[variables.index(r)])) != r
++               for _, r in reps):
++            pre += "_"
++            continue
++        break
++
++    obj = Expr.__new__(cls, expr, Tuple(*variables), point)
++    obj._expr = expr.subs(reps)
++
++    # Check if any substitution leads to an undefined expression
++    for v, p in zip(variables, point):
++        if obj._expr.subs(v, p).is_finite is False:
++            # Evaluate the limit instead
++            limit_expr = Limit(obj._expr, v, p)
++            obj._expr = limit_expr.doit()
++
++    return obj
+ 
+     def _eval_is_commutative(self):
+         return self.expr.is_commutative
+2024-07-03 16:33:45,547 - INFO - Grading answer for sympy__sympy-13915...
+2024-07-03 16:33:45,555 - INFO - report: {'sympy__sympy-13915': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_Mul_does_not_cancel_infinities']}, 'PASS_TO_PASS': {'success': ['test_bug1', 'test_Symbol', 'test_arit0', 'test_pow2', 'test_pow3', 'test_mod_pow', 'test_pow_E', 'test_pow_issue_3516', 'test_pow_im', 'test_real_mul', 'test_ncmul', 'test_ncpow', 'test_powerbug', 'test_Mul_doesnt_expand_exp', 'test_Add_Mul_is_integer', 'test_Add_Mul_is_finite', 'test_Mul_is_even_odd', 'test_evenness_in_ternary_integer_product_with_even', 'test_oddness_in_ternary_integer_product_with_even', 'test_Mul_is_rational', 'test_Add_is_rational', 'test_Add_is_even_odd', 'test_Mul_is_negative_positive', 'test_Mul_is_negative_positive_2', 'test_Mul_is_nonpositive_nonnegative', 'test_Pow_is_zero', 'test_Mul_hermitian_antihermitian', 'test_Add_is_comparable', 'test_Mul_is_comparable', 'test_Pow_is_comparable', 'test_Add_is_positive_2', 'test_Add_is_irrational', 'test_issue_3531b', 'test_bug3', 'test_suppressed_evaluation', 'test_Add_as_coeff_mul', 'test_Pow_as_coeff_mul_doesnt_expand', 'test_issue_3514', 'test_make_args', 'test_issue_5126', 'test_Rational_as_content_primitive', 'test_Add_as_content_primitive', 'test_Mul_as_content_primitive', 'test_Pow_as_content_primitive', 'test_issue_5460', 'test_product_irrational', 'test_issue_5919', 'test_Mod_is_integer', 'test_issue_6001', 'test_polar', 'test_issue_6040', 'test_issue_6082', 'test_issue_6077', 'test_mul_flatten_oo', 'test_add_flatten', 'test_issue_5160_6087_6089_6090', 'test_float_int', 'test_issue_6611a', 'test_denest_add_mul', 'test_mul_zero_detection', 'test_Mul_with_zero_infinite', 'test_issue_8247_8354'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sympy__sympy-13915: resolved: False
+2024-07-03 16:33:45,555 - INFO - Attempting to stop container sweb.eval.sympy__sympy-13915.evaluation_178653...
+2024-07-03 16:33:48,046 - INFO - Attempting to remove container sweb.eval.sympy__sympy-13915.evaluation_178653...
+2024-07-03 16:33:48,257 - INFO - Container sweb.eval.sympy__sympy-13915.evaluation_178653 removed.

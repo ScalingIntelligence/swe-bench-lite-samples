@@ -1,0 +1,159 @@
+2024-07-03 21:51:48,916 - INFO - Environment image sweb.env.x86_64.c795f4b88616b8462021ed:latest found for sympy__sympy-15011
+Building instance image sweb.eval.x86_64.sympy__sympy-15011:latest for sympy__sympy-15011
+2024-07-03 21:51:48,918 - INFO - Image sweb.eval.x86_64.sympy__sympy-15011:latest already exists, skipping build.
+2024-07-03 21:51:48,918 - INFO - Creating container for sympy__sympy-15011...
+2024-07-03 21:51:52,963 - INFO - Container for sympy__sympy-15011 created: 4c69effc28620a771b74c29479346003da0b847a26787ff246c9ddbe1053cc0a
+2024-07-03 21:53:19,049 - INFO - Container for sympy__sympy-15011 started: 4c69effc28620a771b74c29479346003da0b847a26787ff246c9ddbe1053cc0a
+2024-07-03 21:53:19,060 - INFO - Intermediate patch for sympy__sympy-15011 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_205244/model_name_managed_by_server/sympy__sympy-15011/patch.diff, now applying to container...
+2024-07-03 21:53:19,772 - INFO - >>>>> Applied Patch:
+Checking patch sympy/utilities/lambdify.py...
+Applied patch sympy/utilities/lambdify.py cleanly.
+
+2024-07-03 21:53:20,362 - INFO - Git diff before:
+diff --git a/sympy/utilities/lambdify.py b/sympy/utilities/lambdify.py
+index f71bea25f5..eb24ec07e1 100644
+--- a/sympy/utilities/lambdify.py
++++ b/sympy/utilities/lambdify.py
+@@ -389,9 +389,9 @@ def lambdify(args, expr, modules=None, printer=None, use_imps=True,
+         namespace.update(buf)
+ 
+     if hasattr(expr, "atoms"):
+-        #Try if you can extract symbols from the expression.
+-        #Move on if expr.atoms in not implemented.
+-        syms = expr.atoms(Symbol)
++        # Try if you can extract symbols from the expression.
++        # Move on if expr.atoms is not implemented.
++        syms = expr.atoms(Symbol, MatrixSymbol)
+         for term in syms:
+             namespace.update({str(term): term})
+ 
+@@ -451,8 +451,49 @@ def lambdify(args, expr, modules=None, printer=None, use_imps=True,
+     funcname = '_lambdifygenerated'
+ 
+     if _module_present('tensorflow', namespaces):
+-        funcprinter = _TensorflowEvaluatorPrinter(printer, dummify)
+-    else:
++        if _module_present('tensorflow', namespaces):
++            funcprinter = _TensorflowEvaluatorPrinter(printer, dummify)
++        else:
++            funcprinter = _EvaluatorPrinter(printer, dummify)
++
++        # Modify the _EvaluatorPrinter class to handle MatrixSymbol names with curly braces when dummify=True
++        class _EvaluatorPrinter:
++            def __init__(self, printer, dummify):
++                self.printer = printer
++                self.dummify = dummify
++
++            def doprint(self, funcname, args, expr):
++                from sympy.utilities.iterables import flatten
++
++                argstr = ','.join(str(a) for a in flatten(args))
++                func = self._wrap_docstring(self._doprint_a_piece(funcname, args, expr))
++                ns = {}
++                exec_(func, ns)
++                return ns[funcname]
++
++            def _doprint_a_piece(self, funcname, args, expr):
++                from sympy.utilities.iterables import flatten
++
++                if self.dummify:
++                    substs = {}
++                    for a in flatten(args):
++                        if isinstance(a, Symbol) or isinstance(a, MatrixSymbol):
++                            if '{' in a.name:
++                                # Sanitize or replace the name appropriately
++                                substs[a] = Symbol('_' + a.name.replace('{', '').replace('}', ''))
++                    args = tuple(substs.get(a, a) for a in flatten(args))
++                    expr = expr.subs(substs)
++
++                argstr = ','.join(str(a) for a in flatten(args))
++                body = self.printer.doprint(expr)
++                return 'def {}({}): return {}'.format(funcname, argstr, body)
++
++            def _wrap_docstring(self, func):
++                import textwrap
++                return textwrap.dedent('''\
++                {}
++                ''').format('' if func.__doc__ is None else func.__doc__)
++
+         funcprinter = _EvaluatorPrinter(printer, dummify)
+ 
+     funcstr = funcprinter.doprint(funcname, args, expr)
+2024-07-03 21:53:20,364 - INFO - Eval script for sympy__sympy-15011 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_205244/model_name_managed_by_server/sympy__sympy-15011/patch.diff, now applying to container...
+2024-07-03 21:53:40,176 - INFO - Test output for sympy__sympy-15011 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_205244/model_name_managed_by_server/sympy__sympy-15011/test_output.txt
+2024-07-03 21:53:40,229 - INFO - Git diff after:
+diff --git a/sympy/utilities/lambdify.py b/sympy/utilities/lambdify.py
+index f71bea25f5..eb24ec07e1 100644
+--- a/sympy/utilities/lambdify.py
++++ b/sympy/utilities/lambdify.py
+@@ -389,9 +389,9 @@ def lambdify(args, expr, modules=None, printer=None, use_imps=True,
+         namespace.update(buf)
+ 
+     if hasattr(expr, "atoms"):
+-        #Try if you can extract symbols from the expression.
+-        #Move on if expr.atoms in not implemented.
+-        syms = expr.atoms(Symbol)
++        # Try if you can extract symbols from the expression.
++        # Move on if expr.atoms is not implemented.
++        syms = expr.atoms(Symbol, MatrixSymbol)
+         for term in syms:
+             namespace.update({str(term): term})
+ 
+@@ -451,8 +451,49 @@ def lambdify(args, expr, modules=None, printer=None, use_imps=True,
+     funcname = '_lambdifygenerated'
+ 
+     if _module_present('tensorflow', namespaces):
+-        funcprinter = _TensorflowEvaluatorPrinter(printer, dummify)
+-    else:
++        if _module_present('tensorflow', namespaces):
++            funcprinter = _TensorflowEvaluatorPrinter(printer, dummify)
++        else:
++            funcprinter = _EvaluatorPrinter(printer, dummify)
++
++        # Modify the _EvaluatorPrinter class to handle MatrixSymbol names with curly braces when dummify=True
++        class _EvaluatorPrinter:
++            def __init__(self, printer, dummify):
++                self.printer = printer
++                self.dummify = dummify
++
++            def doprint(self, funcname, args, expr):
++                from sympy.utilities.iterables import flatten
++
++                argstr = ','.join(str(a) for a in flatten(args))
++                func = self._wrap_docstring(self._doprint_a_piece(funcname, args, expr))
++                ns = {}
++                exec_(func, ns)
++                return ns[funcname]
++
++            def _doprint_a_piece(self, funcname, args, expr):
++                from sympy.utilities.iterables import flatten
++
++                if self.dummify:
++                    substs = {}
++                    for a in flatten(args):
++                        if isinstance(a, Symbol) or isinstance(a, MatrixSymbol):
++                            if '{' in a.name:
++                                # Sanitize or replace the name appropriately
++                                substs[a] = Symbol('_' + a.name.replace('{', '').replace('}', ''))
++                    args = tuple(substs.get(a, a) for a in flatten(args))
++                    expr = expr.subs(substs)
++
++                argstr = ','.join(str(a) for a in flatten(args))
++                body = self.printer.doprint(expr)
++                return 'def {}({}): return {}'.format(funcname, argstr, body)
++
++            def _wrap_docstring(self, func):
++                import textwrap
++                return textwrap.dedent('''\
++                {}
++                ''').format('' if func.__doc__ is None else func.__doc__)
++
+         funcprinter = _EvaluatorPrinter(printer, dummify)
+ 
+     funcstr = funcprinter.doprint(funcname, args, expr)
+2024-07-03 21:53:40,229 - INFO - Grading answer for sympy__sympy-15011...
+2024-07-03 21:53:40,237 - INFO - report: {'sympy__sympy-15011': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_curly_matrix_symbol']}, 'PASS_TO_PASS': {'success': ['test_bad_args', 'test_math_transl', 'test_mpmath_transl', 'test_imps_errors', 'test_imps_wrong_args', 'test_issue_12092'], 'failure': ['test_no_args', 'test_single_arg', 'test_list_args', 'test_nested_args', 'test_str_args', 'test_own_namespace_1', 'test_own_namespace_2', 'test_own_module', 'test_atoms', 'test_sympy_lambda', 'test_math_lambda', 'test_mpmath_lambda', 'test_number_precision', 'test_mpmath_precision', 'test_exponentiation', 'test_sqrt', 'test_trig', 'test_vector_simple', 'test_vector_discontinuous', 'test_trig_symbolic', 'test_trig_float', 'test_docs', 'test_math', 'test_sin', 'test_matrix', 'test_issue9474', 'test_integral', 'test_sym_single_arg', 'test_sym_list_args', 'test_sym_integral', 'test_namespace_order', 'test_namespace_type', 'test_imps', 'test_lambdify_imps', 'test_dummification', 'test_python_keywords', 'test_lambdify_docstring', 'test_special_printers', 'test_true_false', 'test_issue_2790', 'test_ITE', 'test_Min_Max', 'test_issue_12173', 'test_sinc_mpmath', 'test_lambdify_dummy_arg', 'test_lambdify_mixed_symbol_dummy_args', 'test_lambdify_inspect']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sympy__sympy-15011: resolved: False
+2024-07-03 21:53:40,237 - INFO - Attempting to stop container sweb.eval.sympy__sympy-15011.evaluation_205244...
+2024-07-03 21:53:47,302 - INFO - Attempting to remove container sweb.eval.sympy__sympy-15011.evaluation_205244...
+2024-07-03 21:53:49,594 - INFO - Container sweb.eval.sympy__sympy-15011.evaluation_205244 removed.

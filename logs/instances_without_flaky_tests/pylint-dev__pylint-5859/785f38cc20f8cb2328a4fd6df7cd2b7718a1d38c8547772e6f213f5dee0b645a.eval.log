@@ -1,0 +1,309 @@
+2024-07-03 14:34:32,876 - INFO - Environment image sweb.env.x86_64.e5bb89bf78258a7d14c34b:latest found for pylint-dev__pylint-5859
+Building instance image sweb.eval.x86_64.pylint-dev__pylint-5859:latest for pylint-dev__pylint-5859
+2024-07-03 14:34:32,888 - INFO - Image sweb.eval.x86_64.pylint-dev__pylint-5859:latest already exists, skipping build.
+2024-07-03 14:34:32,888 - INFO - Creating container for pylint-dev__pylint-5859...
+2024-07-03 14:34:34,510 - INFO - Container for pylint-dev__pylint-5859 created: f15aff671ccbbd20e531878fb52123532453ed5c738aac1baac7dc30d63f7834
+2024-07-03 14:34:38,655 - INFO - Container for pylint-dev__pylint-5859 started: f15aff671ccbbd20e531878fb52123532453ed5c738aac1baac7dc30d63f7834
+2024-07-03 14:34:38,655 - INFO - Intermediate patch for pylint-dev__pylint-5859 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_170486/model_name_managed_by_server/pylint-dev__pylint-5859/patch.diff, now applying to container...
+2024-07-03 14:34:41,216 - INFO - >>>>> Applied Patch:
+Checking patch pylint/checkers/misc.py...
+Checking patch pylint/lint/pylinter.py...
+Applied patch pylint/checkers/misc.py cleanly.
+Applied patch pylint/lint/pylinter.py cleanly.
+
+2024-07-03 14:34:42,047 - INFO - Git diff before:
+diff --git a/pylint/checkers/misc.py b/pylint/checkers/misc.py
+index 69149e61a..16649ce3f 100644
+--- a/pylint/checkers/misc.py
++++ b/pylint/checkers/misc.py
+@@ -111,6 +111,7 @@ class EncodingChecker(BaseChecker):
+             {
+                 "type": "string",
+                 "metavar": "<regexp>",
++                "default": r"[\w\W]+",
+                 "help": "Regular expression of note tags to take in consideration.",
+             },
+         ),
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 2f5389d61..9768cd31c 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -1741,6 +1741,15 @@ class PyLinter(
+         ignore_unknown: bool = False,
+     ) -> None:
+         """Do some tests and then iterate over message definitions to set state."""
++        msgdef = self.msgs_store.get_message_definitions(msgid)
++        if msgdef is None:
++            if ignore_unknown:
++                return
++            raise exceptions.UnknownMessageError(msgid)
++        if scope == "file":
++            self._set_file_state_msg(msgdef, enable, line)
++        else:
++            self._set_package_state_msg(msgdef, enable, line)
+         assert scope in {"package", "module"}
+ 
+         message_definitions = self._get_messages_to_set(msgid, enable, ignore_unknown)
+@@ -1757,65 +1766,51 @@ class PyLinter(
+             else:
+                 self.config.disable.append(self._message_symbol(mid))
+ 
+-    def _register_by_id_managed_msg(
+-        self, msgid_or_symbol: str, line: Optional[int], is_disabled: bool = True
+-    ) -> None:
+-        """If the msgid is a numeric one, then register it to inform the user
+-        it could furnish instead a symbolic msgid.
+-        """
+-        if msgid_or_symbol[1:].isdigit():
+-            try:
+-                symbol = self.msgs_store.message_id_store.get_symbol(
+-                    msgid=msgid_or_symbol
+-                )
+-            except exceptions.UnknownMessageError:
+-                return
+-            managed = ManagedMessage(
+-                self.current_name, msgid_or_symbol, symbol, line, is_disabled
+-            )
+-            self._by_id_managed_msgs.append(managed)
++def enable(self, msgid_or_symbol: str, scope: str, line: Optional[int] = None) -> None:
++    self._set_msg_status(
++        msgid_or_symbol, enable=True, scope=scope, line=line, ignore_unknown=False
++    )
++    self._register_by_id_managed_msg(msgid_or_symbol, line)
++
++def disable(
++    self,
++    msgid: str,
++    scope: str = "package",
++    line: Optional[int] = None,
++    ignore_unknown: bool = False,
++) -> None:
++    """Disable a message for a scope."""
++    self._set_msg_status(
++        msgid, enable=False, scope=scope, line=line, ignore_unknown=ignore_unknown
++    )
++    self._register_by_id_managed_msg(msgid, line)
++
++def disable_next(
++    self,
++    msgid: str,
++    scope: str = "package",
++    line: Optional[int] = None,
++    ignore_unknown: bool = False,
++) -> None:
++    """Disable a message for the next line."""
++    if not line:
++        raise exceptions.NoLineSuppliedError
++    self._set_msg_status(
++        msgid,
++        enable=False,
++        scope=scope,
++        line=line + 1,
++        ignore_unknown=ignore_unknown,
++    )
++    self._register_by_id_managed_msg(msgid, line + 1)
+ 
+-    def disable(
+-        self,
+-        msgid: str,
+-        scope: str = "package",
+-        line: Optional[int] = None,
+-        ignore_unknown: bool = False,
+-    ) -> None:
+-        """Disable a message for a scope."""
+-        self._set_msg_status(
+-            msgid, enable=False, scope=scope, line=line, ignore_unknown=ignore_unknown
+-        )
+-        self._register_by_id_managed_msg(msgid, line)
++def _process_note(self, note: str) -> bool:
++    """Process a note tag to determine if it should be handled.
+ 
+-    def disable_next(
+-        self,
+-        msgid: str,
+-        scope: str = "package",
+-        line: Optional[int] = None,
+-        ignore_unknown: bool = False,
+-    ) -> None:
+-        """Disable a message for the next line."""
+-        if not line:
+-            raise exceptions.NoLineSuppliedError
+-        self._set_msg_status(
+-            msgid,
+-            enable=False,
+-            scope=scope,
+-            line=line + 1,
+-            ignore_unknown=ignore_unknown,
+-        )
+-        self._register_by_id_managed_msg(msgid, line + 1)
++    Args:
++        note (str): The note tag to process.
+ 
+-    def enable(
+-        self,
+-        msgid: str,
+-        scope: str = "package",
+-        line: Optional[int] = None,
+-        ignore_unknown: bool = False,
+-    ) -> None:
+-        """Enable a message for a scope."""
+-        self._set_msg_status(
+-            msgid, enable=True, scope=scope, line=line, ignore_unknown=ignore_unknown
+-        )
+-        self._register_by_id_managed_msg(msgid, line, is_disabled=False)
++    Returns:
++        bool: True if the note tag should be handled, False otherwise.
++    """
++    return bool(note.strip() and note.strip().isalpha())
+2024-07-03 14:34:42,047 - INFO - Eval script for pylint-dev__pylint-5859 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_170486/model_name_managed_by_server/pylint-dev__pylint-5859/patch.diff, now applying to container...
+2024-07-03 14:34:58,253 - INFO - Test output for pylint-dev__pylint-5859 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_170486/model_name_managed_by_server/pylint-dev__pylint-5859/test_output.txt
+2024-07-03 14:34:58,445 - INFO - Git diff after:
+diff --git a/pylint/checkers/misc.py b/pylint/checkers/misc.py
+index 69149e61a..16649ce3f 100644
+--- a/pylint/checkers/misc.py
++++ b/pylint/checkers/misc.py
+@@ -111,6 +111,7 @@ class EncodingChecker(BaseChecker):
+             {
+                 "type": "string",
+                 "metavar": "<regexp>",
++                "default": r"[\w\W]+",
+                 "help": "Regular expression of note tags to take in consideration.",
+             },
+         ),
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 2f5389d61..9768cd31c 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -1741,6 +1741,15 @@ class PyLinter(
+         ignore_unknown: bool = False,
+     ) -> None:
+         """Do some tests and then iterate over message definitions to set state."""
++        msgdef = self.msgs_store.get_message_definitions(msgid)
++        if msgdef is None:
++            if ignore_unknown:
++                return
++            raise exceptions.UnknownMessageError(msgid)
++        if scope == "file":
++            self._set_file_state_msg(msgdef, enable, line)
++        else:
++            self._set_package_state_msg(msgdef, enable, line)
+         assert scope in {"package", "module"}
+ 
+         message_definitions = self._get_messages_to_set(msgid, enable, ignore_unknown)
+@@ -1757,65 +1766,51 @@ class PyLinter(
+             else:
+                 self.config.disable.append(self._message_symbol(mid))
+ 
+-    def _register_by_id_managed_msg(
+-        self, msgid_or_symbol: str, line: Optional[int], is_disabled: bool = True
+-    ) -> None:
+-        """If the msgid is a numeric one, then register it to inform the user
+-        it could furnish instead a symbolic msgid.
+-        """
+-        if msgid_or_symbol[1:].isdigit():
+-            try:
+-                symbol = self.msgs_store.message_id_store.get_symbol(
+-                    msgid=msgid_or_symbol
+-                )
+-            except exceptions.UnknownMessageError:
+-                return
+-            managed = ManagedMessage(
+-                self.current_name, msgid_or_symbol, symbol, line, is_disabled
+-            )
+-            self._by_id_managed_msgs.append(managed)
++def enable(self, msgid_or_symbol: str, scope: str, line: Optional[int] = None) -> None:
++    self._set_msg_status(
++        msgid_or_symbol, enable=True, scope=scope, line=line, ignore_unknown=False
++    )
++    self._register_by_id_managed_msg(msgid_or_symbol, line)
++
++def disable(
++    self,
++    msgid: str,
++    scope: str = "package",
++    line: Optional[int] = None,
++    ignore_unknown: bool = False,
++) -> None:
++    """Disable a message for a scope."""
++    self._set_msg_status(
++        msgid, enable=False, scope=scope, line=line, ignore_unknown=ignore_unknown
++    )
++    self._register_by_id_managed_msg(msgid, line)
++
++def disable_next(
++    self,
++    msgid: str,
++    scope: str = "package",
++    line: Optional[int] = None,
++    ignore_unknown: bool = False,
++) -> None:
++    """Disable a message for the next line."""
++    if not line:
++        raise exceptions.NoLineSuppliedError
++    self._set_msg_status(
++        msgid,
++        enable=False,
++        scope=scope,
++        line=line + 1,
++        ignore_unknown=ignore_unknown,
++    )
++    self._register_by_id_managed_msg(msgid, line + 1)
+ 
+-    def disable(
+-        self,
+-        msgid: str,
+-        scope: str = "package",
+-        line: Optional[int] = None,
+-        ignore_unknown: bool = False,
+-    ) -> None:
+-        """Disable a message for a scope."""
+-        self._set_msg_status(
+-            msgid, enable=False, scope=scope, line=line, ignore_unknown=ignore_unknown
+-        )
+-        self._register_by_id_managed_msg(msgid, line)
++def _process_note(self, note: str) -> bool:
++    """Process a note tag to determine if it should be handled.
+ 
+-    def disable_next(
+-        self,
+-        msgid: str,
+-        scope: str = "package",
+-        line: Optional[int] = None,
+-        ignore_unknown: bool = False,
+-    ) -> None:
+-        """Disable a message for the next line."""
+-        if not line:
+-            raise exceptions.NoLineSuppliedError
+-        self._set_msg_status(
+-            msgid,
+-            enable=False,
+-            scope=scope,
+-            line=line + 1,
+-            ignore_unknown=ignore_unknown,
+-        )
+-        self._register_by_id_managed_msg(msgid, line + 1)
++    Args:
++        note (str): The note tag to process.
+ 
+-    def enable(
+-        self,
+-        msgid: str,
+-        scope: str = "package",
+-        line: Optional[int] = None,
+-        ignore_unknown: bool = False,
+-    ) -> None:
+-        """Enable a message for a scope."""
+-        self._set_msg_status(
+-            msgid, enable=True, scope=scope, line=line, ignore_unknown=ignore_unknown
+-        )
+-        self._register_by_id_managed_msg(msgid, line, is_disabled=False)
++    Returns:
++        bool: True if the note tag should be handled, False otherwise.
++    """
++    return bool(note.strip() and note.strip().isalpha())
+2024-07-03 14:34:58,446 - INFO - Grading answer for pylint-dev__pylint-5859...
+2024-07-03 14:34:58,459 - INFO - report: {'pylint-dev__pylint-5859': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['tests/checkers/unittest_misc.py::TestFixme::test_non_alphanumeric_codetag']}, 'PASS_TO_PASS': {'success': [], 'failure': ['tests/checkers/unittest_misc.py::TestFixme::test_fixme_with_message', 'tests/checkers/unittest_misc.py::TestFixme::test_todo_without_message', 'tests/checkers/unittest_misc.py::TestFixme::test_xxx_without_space', 'tests/checkers/unittest_misc.py::TestFixme::test_xxx_middle', 'tests/checkers/unittest_misc.py::TestFixme::test_without_space_fixme', 'tests/checkers/unittest_misc.py::TestFixme::test_absent_codetag', 'tests/checkers/unittest_misc.py::TestFixme::test_other_present_codetag', 'tests/checkers/unittest_misc.py::TestFixme::test_issue_2321_should_not_trigger', 'tests/checkers/unittest_misc.py::TestFixme::test_issue_2321_should_trigger', 'tests/checkers/unittest_misc.py::TestFixme::test_dont_trigger_on_todoist']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for pylint-dev__pylint-5859: resolved: False
+2024-07-03 14:34:58,459 - INFO - Attempting to stop container sweb.eval.pylint-dev__pylint-5859.evaluation_170486...
+2024-07-03 14:35:01,448 - INFO - Attempting to remove container sweb.eval.pylint-dev__pylint-5859.evaluation_170486...
+2024-07-03 14:35:01,971 - INFO - Container sweb.eval.pylint-dev__pylint-5859.evaluation_170486 removed.

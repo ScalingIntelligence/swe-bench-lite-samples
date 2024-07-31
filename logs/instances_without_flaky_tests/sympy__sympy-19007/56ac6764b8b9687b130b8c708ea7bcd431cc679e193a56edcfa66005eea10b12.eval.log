@@ -1,0 +1,265 @@
+2024-07-03 15:09:36,255 - INFO - Environment image sweb.env.x86_64.c795f4b88616b8462021ed:latest found for sympy__sympy-19007
+Building instance image sweb.eval.x86_64.sympy__sympy-19007:latest for sympy__sympy-19007
+2024-07-03 15:09:36,257 - INFO - Image sweb.eval.x86_64.sympy__sympy-19007:latest already exists, skipping build.
+2024-07-03 15:09:36,257 - INFO - Creating container for sympy__sympy-19007...
+2024-07-03 15:09:37,567 - INFO - Container for sympy__sympy-19007 created: 4a1f3708fede3f9d88977fc4c4124f455e3cf0048b0fe353c610ca4b7e4af6cf
+2024-07-03 15:09:38,663 - INFO - Container for sympy__sympy-19007 started: 4a1f3708fede3f9d88977fc4c4124f455e3cf0048b0fe353c610ca4b7e4af6cf
+2024-07-03 15:09:38,663 - INFO - Intermediate patch for sympy__sympy-19007 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_172764/model_name_managed_by_server/sympy__sympy-19007/patch.diff, now applying to container...
+2024-07-03 15:09:39,257 - INFO - >>>>> Applied Patch:
+Checking patch sympy/matrices/expressions/blockmatrix.py...
+Applied patch sympy/matrices/expressions/blockmatrix.py cleanly.
+
+2024-07-03 15:09:39,997 - INFO - Git diff before:
+diff --git a/sympy/matrices/expressions/blockmatrix.py b/sympy/matrices/expressions/blockmatrix.py
+index b821c42845..096fa80f49 100644
+--- a/sympy/matrices/expressions/blockmatrix.py
++++ b/sympy/matrices/expressions/blockmatrix.py
+@@ -1,12 +1,6 @@
+-from __future__ import print_function, division
+-
+-from sympy import ask, Q
+-from sympy.core import Basic, Add
+-from sympy.strategies import typed, exhaust, condition, do_one, unpack
+-from sympy.strategies.traverse import bottom_up
+-from sympy.utilities import sift
++from sympy.core import SympifyError, _sympify, SYMPY_INTS, Integer, Symbol, Expr, Add
++from sympy.strategies import condition, typed, do_one, exhaust, bottom_up, sift, unpack
+ from sympy.utilities.misc import filldedent
+-
+ from sympy.matrices.expressions.matexpr import MatrixExpr, ZeroMatrix, Identity
+ from sympy.matrices.expressions.matmul import MatMul
+ from sympy.matrices.expressions.matadd import MatAdd
+@@ -75,57 +69,51 @@ class BlockMatrix(MatrixExpr):
+     ========
+     sympy.matrices.matrices.MatrixBase.irregular
+     """
+-    def __new__(cls, *args, **kwargs):
+-        from sympy.matrices.immutable import ImmutableDenseMatrix
+-        from sympy.utilities.iterables import is_sequence
+-        isMat = lambda i: getattr(i, 'is_Matrix', False)
+-        if len(args) != 1 or \
+-                not is_sequence(args[0]) or \
+-                len(set([isMat(r) for r in args[0]])) != 1:
+-            raise ValueError(filldedent('''
+-                expecting a sequence of 1 or more rows
+-                containing Matrices.'''))
+-        rows = args[0] if args else []
+-        if not isMat(rows):
+-            if rows and isMat(rows[0]):
+-                rows = [rows]  # rows is not list of lists or []
+-            # regularity check
+-            # same number of matrices in each row
+-            blocky = ok = len(set([len(r) for r in rows])) == 1
+-            if ok:
+-                # same number of rows for each matrix in a row
+-                for r in rows:
+-                    ok = len(set([i.rows for i in r])) == 1
+-                    if not ok:
+-                        break
+-                blocky = ok
+-                # same number of cols for each matrix in each col
+-                for c in range(len(rows[0])):
+-                    ok = len(set([rows[i][c].cols
+-                        for i in range(len(rows))])) == 1
+-                    if not ok:
+-                        break
+-            if not ok:
+-                # same total cols in each row
+-                ok = len(set([
+-                    sum([i.cols for i in r]) for r in rows])) == 1
+-                if blocky and ok:
+-                    raise ValueError(filldedent('''
+-                        Although this matrix is comprised of blocks,
+-                        the blocks do not fill the matrix in a
+-                        size-symmetric fashion. To create a full matrix
+-                        from these arguments, pass them directly to
+-                        Matrix.'''))
+-                raise ValueError(filldedent('''
+-                    When there are not the same number of rows in each
+-                    row's matrices or there are not the same number of
+-                    total columns in each row, the matrix is not a
+-                    block matrix. If this matrix is known to consist of
+-                    blocks fully filling a 2-D space then see
+-                    Matrix.irregular.'''))
+-        mat = ImmutableDenseMatrix(rows, evaluate=False)
+-        obj = Basic.__new__(cls, mat)
+-        return obj
++def __getitem__(self, key):
++    if not isinstance(key, tuple) and isinstance(key, slice):
++        from sympy.matrices.expressions.slice import MatrixSlice
++        return MatrixSlice(self, key, (0, None, 1))
++    if isinstance(key, tuple) and len(key) == 2:
++        i, j = key
++        if isinstance(i, slice) or isinstance(j, slice):
++            from sympy.matrices.expressions.slice import MatrixSlice
++            return MatrixSlice(self, i, j)
++        i, j = _sympify(i), _sympify(j)
++        if self.valid_index(i, j) != False:
++            # Find the appropriate block and return the corresponding element
++            for row_block, numrows in enumerate(self.rowblocksizes):
++                if (i < numrows) != False:
++                    break
++                else:
++                    i -= numrows
++            for col_block, numcols in enumerate(self.colblocksizes):
++                if (j < numcols) != False:
++                    break
++                else:
++                    j -= numcols
++            return self.blocks[row_block, col_block][i, j]
++        else:
++            raise IndexError("Invalid indices (%s, %s)" % (i, j))
++    elif isinstance(key, (SYMPY_INTS, Integer)):
++        # row-wise decomposition of matrix
++        rows, cols = self.shape
++        # allow single indexing if number of columns is known
++        if not isinstance(cols, Integer):
++            raise IndexError(filldedent('''
++                Single indexing is only supported when the number
++                of columns is known.'''))
++        key = _sympify(key)
++        i = key // cols
++        j = key % cols
++        if self.valid_index(i, j) != False:
++            return self._entry(i, j)
++        else:
++            raise IndexError("Invalid index %s" % key)
++    elif isinstance(key, (Symbol, Expr)):
++        raise IndexError(filldedent('''
++            Only integers may be used when addressing the matrix
++            with a single index.'''))
++    raise IndexError("Invalid index, wanted %s[i,j]" % self)
+ 
+     @property
+     def shape(self):
+2024-07-03 15:09:39,997 - INFO - Eval script for sympy__sympy-19007 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_172764/model_name_managed_by_server/sympy__sympy-19007/patch.diff, now applying to container...
+2024-07-03 15:09:49,446 - INFO - Test output for sympy__sympy-19007 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_172764/model_name_managed_by_server/sympy__sympy-19007/test_output.txt
+2024-07-03 15:09:49,512 - INFO - Git diff after:
+diff --git a/sympy/matrices/expressions/blockmatrix.py b/sympy/matrices/expressions/blockmatrix.py
+index b821c42845..096fa80f49 100644
+--- a/sympy/matrices/expressions/blockmatrix.py
++++ b/sympy/matrices/expressions/blockmatrix.py
+@@ -1,12 +1,6 @@
+-from __future__ import print_function, division
+-
+-from sympy import ask, Q
+-from sympy.core import Basic, Add
+-from sympy.strategies import typed, exhaust, condition, do_one, unpack
+-from sympy.strategies.traverse import bottom_up
+-from sympy.utilities import sift
++from sympy.core import SympifyError, _sympify, SYMPY_INTS, Integer, Symbol, Expr, Add
++from sympy.strategies import condition, typed, do_one, exhaust, bottom_up, sift, unpack
+ from sympy.utilities.misc import filldedent
+-
+ from sympy.matrices.expressions.matexpr import MatrixExpr, ZeroMatrix, Identity
+ from sympy.matrices.expressions.matmul import MatMul
+ from sympy.matrices.expressions.matadd import MatAdd
+@@ -75,57 +69,51 @@ class BlockMatrix(MatrixExpr):
+     ========
+     sympy.matrices.matrices.MatrixBase.irregular
+     """
+-    def __new__(cls, *args, **kwargs):
+-        from sympy.matrices.immutable import ImmutableDenseMatrix
+-        from sympy.utilities.iterables import is_sequence
+-        isMat = lambda i: getattr(i, 'is_Matrix', False)
+-        if len(args) != 1 or \
+-                not is_sequence(args[0]) or \
+-                len(set([isMat(r) for r in args[0]])) != 1:
+-            raise ValueError(filldedent('''
+-                expecting a sequence of 1 or more rows
+-                containing Matrices.'''))
+-        rows = args[0] if args else []
+-        if not isMat(rows):
+-            if rows and isMat(rows[0]):
+-                rows = [rows]  # rows is not list of lists or []
+-            # regularity check
+-            # same number of matrices in each row
+-            blocky = ok = len(set([len(r) for r in rows])) == 1
+-            if ok:
+-                # same number of rows for each matrix in a row
+-                for r in rows:
+-                    ok = len(set([i.rows for i in r])) == 1
+-                    if not ok:
+-                        break
+-                blocky = ok
+-                # same number of cols for each matrix in each col
+-                for c in range(len(rows[0])):
+-                    ok = len(set([rows[i][c].cols
+-                        for i in range(len(rows))])) == 1
+-                    if not ok:
+-                        break
+-            if not ok:
+-                # same total cols in each row
+-                ok = len(set([
+-                    sum([i.cols for i in r]) for r in rows])) == 1
+-                if blocky and ok:
+-                    raise ValueError(filldedent('''
+-                        Although this matrix is comprised of blocks,
+-                        the blocks do not fill the matrix in a
+-                        size-symmetric fashion. To create a full matrix
+-                        from these arguments, pass them directly to
+-                        Matrix.'''))
+-                raise ValueError(filldedent('''
+-                    When there are not the same number of rows in each
+-                    row's matrices or there are not the same number of
+-                    total columns in each row, the matrix is not a
+-                    block matrix. If this matrix is known to consist of
+-                    blocks fully filling a 2-D space then see
+-                    Matrix.irregular.'''))
+-        mat = ImmutableDenseMatrix(rows, evaluate=False)
+-        obj = Basic.__new__(cls, mat)
+-        return obj
++def __getitem__(self, key):
++    if not isinstance(key, tuple) and isinstance(key, slice):
++        from sympy.matrices.expressions.slice import MatrixSlice
++        return MatrixSlice(self, key, (0, None, 1))
++    if isinstance(key, tuple) and len(key) == 2:
++        i, j = key
++        if isinstance(i, slice) or isinstance(j, slice):
++            from sympy.matrices.expressions.slice import MatrixSlice
++            return MatrixSlice(self, i, j)
++        i, j = _sympify(i), _sympify(j)
++        if self.valid_index(i, j) != False:
++            # Find the appropriate block and return the corresponding element
++            for row_block, numrows in enumerate(self.rowblocksizes):
++                if (i < numrows) != False:
++                    break
++                else:
++                    i -= numrows
++            for col_block, numcols in enumerate(self.colblocksizes):
++                if (j < numcols) != False:
++                    break
++                else:
++                    j -= numcols
++            return self.blocks[row_block, col_block][i, j]
++        else:
++            raise IndexError("Invalid indices (%s, %s)" % (i, j))
++    elif isinstance(key, (SYMPY_INTS, Integer)):
++        # row-wise decomposition of matrix
++        rows, cols = self.shape
++        # allow single indexing if number of columns is known
++        if not isinstance(cols, Integer):
++            raise IndexError(filldedent('''
++                Single indexing is only supported when the number
++                of columns is known.'''))
++        key = _sympify(key)
++        i = key // cols
++        j = key % cols
++        if self.valid_index(i, j) != False:
++            return self._entry(i, j)
++        else:
++            raise IndexError("Invalid index %s" % key)
++    elif isinstance(key, (Symbol, Expr)):
++        raise IndexError(filldedent('''
++            Only integers may be used when addressing the matrix
++            with a single index.'''))
++    raise IndexError("Invalid index, wanted %s[i,j]" % self)
+ 
+     @property
+     def shape(self):
+2024-07-03 15:09:49,512 - INFO - Grading answer for sympy__sympy-19007...
+2024-07-03 15:09:49,514 - INFO - report: {'sympy__sympy-19007': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_block_index_symbolic', 'test_block_index_symbolic_nonzero', 'test_block_index_large']}, 'PASS_TO_PASS': {'success': [], 'failure': ['test_bc_matmul', 'test_bc_matadd', 'test_bc_transpose', 'test_bc_dist_diag', 'test_block_plus_ident', 'test_BlockMatrix', 'test_block_collapse_explicit_matrices', 'test_issue_17624', 'test_issue_18618', 'test_BlockMatrix_trace', 'test_BlockMatrix_Determinant', 'test_squareBlockMatrix', 'test_BlockDiagMatrix', 'test_blockcut', 'test_reblock_2x2', 'test_deblock', 'test_symbolic_indexing', 'test_add_index', 'test_mul_index', 'test_pow_index', 'test_transpose_index', 'test_Identity_index', 'test_block_index', 'test_slicing', 'test_errors', 'test_matrix_expression_to_indices']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sympy__sympy-19007: resolved: False
+2024-07-03 15:09:49,514 - INFO - Attempting to stop container sweb.eval.sympy__sympy-19007.evaluation_172764...
+2024-07-03 15:09:52,395 - INFO - Attempting to remove container sweb.eval.sympy__sympy-19007.evaluation_172764...
+2024-07-03 15:09:52,795 - INFO - Container sweb.eval.sympy__sympy-19007.evaluation_172764 removed.

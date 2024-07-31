@@ -1,0 +1,189 @@
+2024-07-03 15:33:40,961 - INFO - Environment image sweb.env.x86_64.428468730904ff6b4232aa:latest found for astropy__astropy-12907
+Building instance image sweb.eval.x86_64.astropy__astropy-12907:latest for astropy__astropy-12907
+2024-07-03 15:33:40,963 - INFO - Image sweb.eval.x86_64.astropy__astropy-12907:latest already exists, skipping build.
+2024-07-03 15:33:40,963 - INFO - Creating container for astropy__astropy-12907...
+2024-07-03 15:33:45,524 - INFO - Container for astropy__astropy-12907 created: e2c15b8853a26da2ab74dae06382977fedb31fcf92b518501bc804af517f6a86
+2024-07-03 15:33:49,335 - INFO - Container for astropy__astropy-12907 started: e2c15b8853a26da2ab74dae06382977fedb31fcf92b518501bc804af517f6a86
+2024-07-03 15:33:49,335 - INFO - Intermediate patch for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_174422/model_name_managed_by_server/astropy__astropy-12907/patch.diff, now applying to container...
+2024-07-03 15:33:50,714 - INFO - >>>>> Applied Patch:
+Checking patch astropy/modeling/core.py...
+Applied patch astropy/modeling/core.py cleanly.
+
+2024-07-03 15:33:51,319 - INFO - Git diff before:
+diff --git a/astropy/modeling/core.py b/astropy/modeling/core.py
+index da4352cb0c..59ed9766c1 100644
+--- a/astropy/modeling/core.py
++++ b/astropy/modeling/core.py
+@@ -3967,38 +3967,39 @@ class CompoundModel(Model):
+         else:
+             return super().without_units_for_data(**kwargs)
+ 
+-    def with_units_from_data(self, **kwargs):
+-        """
+-        See `~astropy.modeling.Model.with_units_from_data` for overview
+-        of this method.
+-
+-        Notes
+-        -----
+-        This modifies the behavior of the base method to account for the
+-        case where the sub-models of a compound model have different output
+-        units. This is only valid for compound * and / compound models as
+-        in that case it is reasonable to mix the output units. In order to
+-        do this it requires some additional information output by
+-        `~astropy.modeling.CompoundModel.without_units_for_data` passed as
+-        keyword arguments under the keywords ``_left_kwargs`` and ``_right_kwargs``.
+-
+-        Outside the mixed output units, this method is identical to the
+-        base method.
+-        """
+-
+-        if self.op in ['*', '/']:
+-            left_kwargs = kwargs.pop('_left_kwargs')
+-            right_kwargs = kwargs.pop('_right_kwargs')
++def _calculate_separability_matrix(self):
++    def block_diag(*arrs):
++        shapes = [(arr.shape[0], arr.shape[1]) for arr in arrs]
++        out = np.zeros((sum(shape[0] for shape in shapes), sum(shape[1] for shape in shapes)), dtype=bool)
++        r, c = 0, 0
++        for i, (rr, cc) in enumerate(shapes):
++            out[r:r+rr, c:c+cc] = arrs[i]
++            r += rr
++            c += cc
++        return out
+ 
+-            left = self.left.with_units_from_data(**left_kwargs)
+-            right = self.right.with_units_from_data(**right_kwargs)
++    left_matrix = self.left._calculate_separability_matrix()
++    right_matrix = self.right._calculate_separability_matrix()
+ 
+-            model = self.copy()
+-            model._set_sub_models_and_parameter_units(left, right)
++    if left_matrix is NotImplemented or right_matrix is NotImplemented:
++        return NotImplemented
+ 
+-            return model
+-        else:
+-            return super().with_units_from_data(**kwargs)
++    if self.op == '&':
++        return block_diag(left_matrix, right_matrix)
++    elif self.op == '|':
++        output_shape = (self.n_outputs, self.n_inputs)
++        output = np.zeros(output_shape, dtype=bool)
++        for i in range(self.left.n_outputs):
++            for j in range(self.left.n_inputs):
++                if left_matrix[i, j]:
++                    output[i, j] = True
++        for i in range(self.right.n_outputs):
++            for j in range(self.right.n_inputs):
++                if right_matrix[i, j]:
++                    output[i, j + self.left.n_inputs] = True
++        return output
++    else:
++        return NotImplemented
+ 
+ 
+ def _get_submodel_path(model, name):
+diff --git a/pyproject.toml b/pyproject.toml
+index 3364d30740..02dddbe713 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,5 +1,5 @@
+ [build-system]
+-requires = ["setuptools",
++requires = ["setuptools==68.0.0",
+             "setuptools_scm>=6.2",
+             "wheel",
+             "cython==0.29.22",
+2024-07-03 15:33:51,330 - INFO - Eval script for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_174422/model_name_managed_by_server/astropy__astropy-12907/patch.diff, now applying to container...
+2024-07-03 15:34:15,858 - INFO - Test output for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_174422/model_name_managed_by_server/astropy__astropy-12907/test_output.txt
+2024-07-03 15:34:15,954 - INFO - Git diff after:
+diff --git a/astropy/modeling/core.py b/astropy/modeling/core.py
+index da4352cb0c..59ed9766c1 100644
+--- a/astropy/modeling/core.py
++++ b/astropy/modeling/core.py
+@@ -3967,38 +3967,39 @@ class CompoundModel(Model):
+         else:
+             return super().without_units_for_data(**kwargs)
+ 
+-    def with_units_from_data(self, **kwargs):
+-        """
+-        See `~astropy.modeling.Model.with_units_from_data` for overview
+-        of this method.
+-
+-        Notes
+-        -----
+-        This modifies the behavior of the base method to account for the
+-        case where the sub-models of a compound model have different output
+-        units. This is only valid for compound * and / compound models as
+-        in that case it is reasonable to mix the output units. In order to
+-        do this it requires some additional information output by
+-        `~astropy.modeling.CompoundModel.without_units_for_data` passed as
+-        keyword arguments under the keywords ``_left_kwargs`` and ``_right_kwargs``.
+-
+-        Outside the mixed output units, this method is identical to the
+-        base method.
+-        """
+-
+-        if self.op in ['*', '/']:
+-            left_kwargs = kwargs.pop('_left_kwargs')
+-            right_kwargs = kwargs.pop('_right_kwargs')
++def _calculate_separability_matrix(self):
++    def block_diag(*arrs):
++        shapes = [(arr.shape[0], arr.shape[1]) for arr in arrs]
++        out = np.zeros((sum(shape[0] for shape in shapes), sum(shape[1] for shape in shapes)), dtype=bool)
++        r, c = 0, 0
++        for i, (rr, cc) in enumerate(shapes):
++            out[r:r+rr, c:c+cc] = arrs[i]
++            r += rr
++            c += cc
++        return out
+ 
+-            left = self.left.with_units_from_data(**left_kwargs)
+-            right = self.right.with_units_from_data(**right_kwargs)
++    left_matrix = self.left._calculate_separability_matrix()
++    right_matrix = self.right._calculate_separability_matrix()
+ 
+-            model = self.copy()
+-            model._set_sub_models_and_parameter_units(left, right)
++    if left_matrix is NotImplemented or right_matrix is NotImplemented:
++        return NotImplemented
+ 
+-            return model
+-        else:
+-            return super().with_units_from_data(**kwargs)
++    if self.op == '&':
++        return block_diag(left_matrix, right_matrix)
++    elif self.op == '|':
++        output_shape = (self.n_outputs, self.n_inputs)
++        output = np.zeros(output_shape, dtype=bool)
++        for i in range(self.left.n_outputs):
++            for j in range(self.left.n_inputs):
++                if left_matrix[i, j]:
++                    output[i, j] = True
++        for i in range(self.right.n_outputs):
++            for j in range(self.right.n_inputs):
++                if right_matrix[i, j]:
++                    output[i, j + self.left.n_inputs] = True
++        return output
++    else:
++        return NotImplemented
+ 
+ 
+ def _get_submodel_path(model, name):
+diff --git a/pyproject.toml b/pyproject.toml
+index 3364d30740..02dddbe713 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,5 +1,5 @@
+ [build-system]
+-requires = ["setuptools",
++requires = ["setuptools==68.0.0",
+             "setuptools_scm>=6.2",
+             "wheel",
+             "cython==0.29.22",
+2024-07-03 15:34:15,954 - INFO - Grading answer for astropy__astropy-12907...
+2024-07-03 15:34:15,956 - INFO - report: {'astropy__astropy-12907': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['astropy/modeling/tests/test_separable.py::test_separable[compound_model6-result6]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model9-result9]']}, 'PASS_TO_PASS': {'success': ['astropy/modeling/tests/test_separable.py::test_coord_matrix', 'astropy/modeling/tests/test_separable.py::test_cdot', 'astropy/modeling/tests/test_separable.py::test_cstack', 'astropy/modeling/tests/test_separable.py::test_arith_oper', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model0-result0]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model1-result1]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model2-result2]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model3-result3]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model4-result4]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model5-result5]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model7-result7]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model8-result8]', 'astropy/modeling/tests/test_separable.py::test_custom_model_separable'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for astropy__astropy-12907: resolved: False
+2024-07-03 15:34:15,956 - INFO - Attempting to stop container sweb.eval.astropy__astropy-12907.evaluation_174422...
+2024-07-03 15:34:18,476 - INFO - Attempting to remove container sweb.eval.astropy__astropy-12907.evaluation_174422...
+2024-07-03 15:34:18,868 - INFO - Container sweb.eval.astropy__astropy-12907.evaluation_174422 removed.

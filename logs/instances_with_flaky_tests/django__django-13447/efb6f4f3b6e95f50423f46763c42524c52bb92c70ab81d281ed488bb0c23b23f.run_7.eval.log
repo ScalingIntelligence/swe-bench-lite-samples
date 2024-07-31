@@ -1,0 +1,307 @@
+2024-07-09 22:16:35,358 - INFO - Environment image sweb.env.x86_64.297af196949a2a635bce66:latest found for django__django-13447
+Building instance image sweb.eval.x86_64.django__django-13447:latest for django__django-13447
+2024-07-09 22:16:35,360 - INFO - Image sweb.eval.x86_64.django__django-13447:latest already exists, skipping build.
+2024-07-09 22:16:35,360 - INFO - Creating container for django__django-13447...
+2024-07-09 22:16:35,558 - INFO - Container for django__django-13447 created: c003620ba39d983cf50e26e15f52fd602f379ddaa31631c39bb59e0de79ba872
+2024-07-09 22:16:38,022 - INFO - Container for django__django-13447 started: c003620ba39d983cf50e26e15f52fd602f379ddaa31631c39bb59e0de79ba872
+2024-07-09 22:16:38,022 - INFO - Intermediate patch for django__django-13447 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_243403/model_name_managed_by_server/django__django-13447/patch.diff, now applying to container...
+2024-07-09 22:16:38,628 - INFO - >>>>> Applied Patch:
+Checking patch django/contrib/admin/sites.py...
+Applied patch django/contrib/admin/sites.py cleanly.
+
+2024-07-09 22:17:01,166 - INFO - Git diff before:
+diff --git a/django/contrib/admin/sites.py b/django/contrib/admin/sites.py
+index 837dabfea8..ea7b215226 100644
+--- a/django/contrib/admin/sites.py
++++ b/django/contrib/admin/sites.py
+@@ -430,73 +430,74 @@ class AdminSite:
+                     return HttpResponsePermanentRedirect(path)
+         raise Http404
+ 
+-    def _build_app_dict(self, request, label=None):
+-        """
+-        Build the app dictionary. The optional `label` parameter filters models
+-        of a specific app.
+-        """
+-        app_dict = {}
+-
+-        if label:
+-            models = {
+-                m: m_a for m, m_a in self._registry.items()
+-                if m._meta.app_label == label
+-            }
+-        else:
+-            models = self._registry
+-
+-        for model, model_admin in models.items():
+-            app_label = model._meta.app_label
+-
+-            has_module_perms = model_admin.has_module_permission(request)
+-            if not has_module_perms:
+-                continue
+-
+-            perms = model_admin.get_model_perms(request)
++def build_app_dict(self, request, label=None):
++    """
++    Build the app dictionary. The optional `label` parameter filters models
++    of a specific app.
++    """
++    app_dict = {}
+ 
+-            # Check whether user has any perm for this module.
+-            # If so, add the module to the model_list.
+-            if True not in perms.values():
+-                continue
++    if label:
++        models = {
++            m: m_a for m, m_a in self._registry.items()
++            if m._meta.app_label == label
++        }
++    else:
++        models = self._registry
++
++    for model, model_admin in models.items():
++        app_label = model._meta.app_label
++
++        has_module_perms = model_admin.has_module_permission(request)
++        if not has_module_perms:
++            continue
++
++        perms = model_admin.get_model_perms(request)
++
++        # Check whether user has any perm for this module.
++        # If so, add the module to the model_list.
++        if True not in perms.values():
++            continue
++
++        info = (app_label, model._meta.model_name)
++        model_dict = {
++            'name': capfirst(model._meta.verbose_name_plural),
++            'object_name': model._meta.object_name,
++            'perms': perms,
++            'admin_url': None,
++            'add_url': None,
++            'model_class': model,  # Include the model class in the dictionary
++        }
++        if perms.get('change') or perms.get('view'):
++            model_dict['view_only'] = not perms.get('change')
++            try:
++                model_dict['admin_url'] = reverse('admin:%s_%s_changelist' % info, current_app=self.name)
++            except NoReverseMatch:
++                pass
++        if perms.get('add'):
++            try:
++                model_dict['add_url'] = reverse('admin:%s_%s_add' % info, current_app=self.name)
++            except NoReverseMatch:
++                pass
+ 
+-            info = (app_label, model._meta.model_name)
+-            model_dict = {
+-                'name': capfirst(model._meta.verbose_name_plural),
+-                'object_name': model._meta.object_name,
+-                'perms': perms,
+-                'admin_url': None,
+-                'add_url': None,
++        if app_label in app_dict:
++            app_dict[app_label]['models'].append(model_dict)
++        else:
++            app_dict[app_label] = {
++                'name': apps.get_app_config(app_label).verbose_name,
++                'app_label': app_label,
++                'app_url': reverse(
++                    'admin:app_list',
++                    kwargs={'app_label': app_label},
++                    current_app=self.name,
++                ),
++                'has_module_perms': has_module_perms,
++                'models': [model_dict],
+             }
+-            if perms.get('change') or perms.get('view'):
+-                model_dict['view_only'] = not perms.get('change')
+-                try:
+-                    model_dict['admin_url'] = reverse('admin:%s_%s_changelist' % info, current_app=self.name)
+-                except NoReverseMatch:
+-                    pass
+-            if perms.get('add'):
+-                try:
+-                    model_dict['add_url'] = reverse('admin:%s_%s_add' % info, current_app=self.name)
+-                except NoReverseMatch:
+-                    pass
+-
+-            if app_label in app_dict:
+-                app_dict[app_label]['models'].append(model_dict)
+-            else:
+-                app_dict[app_label] = {
+-                    'name': apps.get_app_config(app_label).verbose_name,
+-                    'app_label': app_label,
+-                    'app_url': reverse(
+-                        'admin:app_list',
+-                        kwargs={'app_label': app_label},
+-                        current_app=self.name,
+-                    ),
+-                    'has_module_perms': has_module_perms,
+-                    'models': [model_dict],
+-                }
+-
+-        if label:
+-            return app_dict.get(label)
+-        return app_dict
++
++    if label:
++        return app_dict.get(label)
++    return app_dict
+ 
+     def get_app_list(self, request):
+         """
+2024-07-09 22:17:01,171 - INFO - Eval script for django__django-13447 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_243403/model_name_managed_by_server/django__django-13447/patch.diff, now applying to container...
+2024-07-09 22:17:29,036 - INFO - Test output for django__django-13447 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_243403/model_name_managed_by_server/django__django-13447/test_output.txt
+2024-07-09 22:17:29,109 - INFO - Git diff after:
+diff --git a/django/contrib/admin/sites.py b/django/contrib/admin/sites.py
+index 837dabfea8..ea7b215226 100644
+--- a/django/contrib/admin/sites.py
++++ b/django/contrib/admin/sites.py
+@@ -430,73 +430,74 @@ class AdminSite:
+                     return HttpResponsePermanentRedirect(path)
+         raise Http404
+ 
+-    def _build_app_dict(self, request, label=None):
+-        """
+-        Build the app dictionary. The optional `label` parameter filters models
+-        of a specific app.
+-        """
+-        app_dict = {}
+-
+-        if label:
+-            models = {
+-                m: m_a for m, m_a in self._registry.items()
+-                if m._meta.app_label == label
+-            }
+-        else:
+-            models = self._registry
+-
+-        for model, model_admin in models.items():
+-            app_label = model._meta.app_label
+-
+-            has_module_perms = model_admin.has_module_permission(request)
+-            if not has_module_perms:
+-                continue
+-
+-            perms = model_admin.get_model_perms(request)
++def build_app_dict(self, request, label=None):
++    """
++    Build the app dictionary. The optional `label` parameter filters models
++    of a specific app.
++    """
++    app_dict = {}
+ 
+-            # Check whether user has any perm for this module.
+-            # If so, add the module to the model_list.
+-            if True not in perms.values():
+-                continue
++    if label:
++        models = {
++            m: m_a for m, m_a in self._registry.items()
++            if m._meta.app_label == label
++        }
++    else:
++        models = self._registry
++
++    for model, model_admin in models.items():
++        app_label = model._meta.app_label
++
++        has_module_perms = model_admin.has_module_permission(request)
++        if not has_module_perms:
++            continue
++
++        perms = model_admin.get_model_perms(request)
++
++        # Check whether user has any perm for this module.
++        # If so, add the module to the model_list.
++        if True not in perms.values():
++            continue
++
++        info = (app_label, model._meta.model_name)
++        model_dict = {
++            'name': capfirst(model._meta.verbose_name_plural),
++            'object_name': model._meta.object_name,
++            'perms': perms,
++            'admin_url': None,
++            'add_url': None,
++            'model_class': model,  # Include the model class in the dictionary
++        }
++        if perms.get('change') or perms.get('view'):
++            model_dict['view_only'] = not perms.get('change')
++            try:
++                model_dict['admin_url'] = reverse('admin:%s_%s_changelist' % info, current_app=self.name)
++            except NoReverseMatch:
++                pass
++        if perms.get('add'):
++            try:
++                model_dict['add_url'] = reverse('admin:%s_%s_add' % info, current_app=self.name)
++            except NoReverseMatch:
++                pass
+ 
+-            info = (app_label, model._meta.model_name)
+-            model_dict = {
+-                'name': capfirst(model._meta.verbose_name_plural),
+-                'object_name': model._meta.object_name,
+-                'perms': perms,
+-                'admin_url': None,
+-                'add_url': None,
++        if app_label in app_dict:
++            app_dict[app_label]['models'].append(model_dict)
++        else:
++            app_dict[app_label] = {
++                'name': apps.get_app_config(app_label).verbose_name,
++                'app_label': app_label,
++                'app_url': reverse(
++                    'admin:app_list',
++                    kwargs={'app_label': app_label},
++                    current_app=self.name,
++                ),
++                'has_module_perms': has_module_perms,
++                'models': [model_dict],
+             }
+-            if perms.get('change') or perms.get('view'):
+-                model_dict['view_only'] = not perms.get('change')
+-                try:
+-                    model_dict['admin_url'] = reverse('admin:%s_%s_changelist' % info, current_app=self.name)
+-                except NoReverseMatch:
+-                    pass
+-            if perms.get('add'):
+-                try:
+-                    model_dict['add_url'] = reverse('admin:%s_%s_add' % info, current_app=self.name)
+-                except NoReverseMatch:
+-                    pass
+-
+-            if app_label in app_dict:
+-                app_dict[app_label]['models'].append(model_dict)
+-            else:
+-                app_dict[app_label] = {
+-                    'name': apps.get_app_config(app_label).verbose_name,
+-                    'app_label': app_label,
+-                    'app_url': reverse(
+-                        'admin:app_list',
+-                        kwargs={'app_label': app_label},
+-                        current_app=self.name,
+-                    ),
+-                    'has_module_perms': has_module_perms,
+-                    'models': [model_dict],
+-                }
+-
+-        if label:
+-            return app_dict.get(label)
+-        return app_dict
++
++    if label:
++        return app_dict.get(label)
++    return app_dict
+ 
+     def get_app_list(self, request):
+         """
+2024-07-09 22:17:29,109 - INFO - Grading answer for django__django-13447...
+2024-07-09 22:17:29,113 - INFO - report: {'django__django-13447': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_available_apps (admin_views.test_adminsite.SiteEachContextTest)']}, 'PASS_TO_PASS': {'success': [], 'failure': ['test_add_action (admin_views.test_adminsite.SiteActionsTests)', 'test_disable_action (admin_views.test_adminsite.SiteActionsTests)', "AdminSite.get_action() returns an action even if it's disabled.", 'test_each_context (admin_views.test_adminsite.SiteEachContextTest)', 'test_each_context_site_url_with_script_name (admin_views.test_adminsite.SiteEachContextTest)']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for django__django-13447: resolved: False
+2024-07-09 22:17:29,113 - INFO - Attempting to stop container sweb.eval.django__django-13447.evaluation_243403...
+2024-07-09 22:17:37,796 - INFO - Attempting to remove container sweb.eval.django__django-13447.evaluation_243403...
+2024-07-09 22:17:38,005 - INFO - Container sweb.eval.django__django-13447.evaluation_243403 removed.

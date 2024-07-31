@@ -1,0 +1,181 @@
+2024-07-03 21:06:04,848 - INFO - Environment image sweb.env.x86_64.1b3b218535da0abf4469cb:latest found for sphinx-doc__sphinx-10325
+Building instance image sweb.eval.x86_64.sphinx-doc__sphinx-10325:latest for sphinx-doc__sphinx-10325
+2024-07-03 21:06:04,850 - INFO - Image sweb.eval.x86_64.sphinx-doc__sphinx-10325:latest already exists, skipping build.
+2024-07-03 21:06:04,850 - INFO - Creating container for sphinx-doc__sphinx-10325...
+2024-07-03 21:06:07,166 - INFO - Container for sphinx-doc__sphinx-10325 created: 76492c6db1e4d8b4c227aa1691af1364aff5a357d50a84b849f4aa174dbae536
+2024-07-03 21:06:15,342 - INFO - Container for sphinx-doc__sphinx-10325 started: 76492c6db1e4d8b4c227aa1691af1364aff5a357d50a84b849f4aa174dbae536
+2024-07-03 21:06:15,349 - INFO - Intermediate patch for sphinx-doc__sphinx-10325 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_201666/model_name_managed_by_server/sphinx-doc__sphinx-10325/patch.diff, now applying to container...
+2024-07-03 21:06:15,788 - INFO - >>>>> Applied Patch:
+Checking patch sphinx/ext/autodoc/__init__.py...
+Applied patch sphinx/ext/autodoc/__init__.py cleanly.
+
+2024-07-03 21:06:16,203 - INFO - Git diff before:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 62631f7ff..87cc5ceda 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -111,7 +111,9 @@ def exclude_members_option(arg: Any) -> Union[object, Set[str]]:
+ 
+ def inherited_members_option(arg: Any) -> Union[object, Set[str]]:
+     """Used to convert the :members: option to auto directives."""
+-    if arg in (None, True):
++    if isinstance(arg, list):
++        return set(arg)
++    elif arg in (None, True):
+         return 'object'
+     else:
+         return arg
+@@ -1082,22 +1084,23 @@ class ModuleDocumenter(Documenter):
+ 
+     def get_object_members(self, want_all: bool) -> Tuple[bool, ObjectMembers]:
+         members = self.get_module_members()
++        inherited_members = self.options.get('inherited_members', set())
+         if want_all:
+             if self.__all__ is None:
+                 # for implicit module members, check __module__ to avoid
+                 # documenting imported objects
+-                return True, list(members.values())
++                return True, [member for member in members.values() if member.class_ not in inherited_members]
+             else:
+                 for member in members.values():
+-                    if member.__name__ not in self.__all__:
++                    if member.__name__ not in self.__all__ or member.class_ in inherited_members:
+                         member.skipped = True
+ 
+-                return False, list(members.values())
++                return False, [member for member in members.values() if not member.skipped]
+         else:
+             memberlist = self.options.members or []
+             ret = []
+             for name in memberlist:
+-                if name in members:
++                if name in members and members[name].class_ not in inherited_members:
+                     ret.append(members[name])
+                 else:
+                     logger.warning(__('missing attribute mentioned in :members: option: '
+@@ -1697,20 +1700,21 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+ 
+     def get_object_members(self, want_all: bool) -> Tuple[bool, ObjectMembers]:
+         members = get_class_members(self.object, self.objpath, self.get_attr)
++        inherited_members_option = self.options.get('inherited_members', set())
+         if not want_all:
+             if not self.options.members:
+                 return False, []  # type: ignore
+             # specific members given
+             selected = []
+             for name in self.options.members:  # type: str
+-                if name in members:
++                if name in members and members[name].class_ not in inherited_members_option:
+                     selected.append(members[name])
+                 else:
+                     logger.warning(__('missing attribute %s in object %s') %
+                                    (name, self.fullname), type='autodoc')
+             return False, selected
+         elif self.options.inherited_members:
+-            return False, list(members.values())
++            return False, [m for m in members.values() if m.class_ not in inherited_members_option]
+         else:
+             return False, [m for m in members.values() if m.class_ == self.object]
+ 
+diff --git a/tox.ini b/tox.ini
+index f0afd779b..30ca90275 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -28,7 +28,7 @@ setenv =
+     PYTHONWARNINGS = all
+     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes
+ commands=
+-    python -X dev -m pytest --durations 25 {posargs}
++    python -X dev -m pytest -rA --durations 25 {posargs}
+ 
+ [testenv:du-latest]
+ commands =
+2024-07-03 21:06:16,204 - INFO - Eval script for sphinx-doc__sphinx-10325 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_201666/model_name_managed_by_server/sphinx-doc__sphinx-10325/patch.diff, now applying to container...
+2024-07-03 21:07:04,677 - INFO - Test output for sphinx-doc__sphinx-10325 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_201666/model_name_managed_by_server/sphinx-doc__sphinx-10325/test_output.txt
+2024-07-03 21:07:04,776 - INFO - Git diff after:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 62631f7ff..87cc5ceda 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -111,7 +111,9 @@ def exclude_members_option(arg: Any) -> Union[object, Set[str]]:
+ 
+ def inherited_members_option(arg: Any) -> Union[object, Set[str]]:
+     """Used to convert the :members: option to auto directives."""
+-    if arg in (None, True):
++    if isinstance(arg, list):
++        return set(arg)
++    elif arg in (None, True):
+         return 'object'
+     else:
+         return arg
+@@ -1082,22 +1084,23 @@ class ModuleDocumenter(Documenter):
+ 
+     def get_object_members(self, want_all: bool) -> Tuple[bool, ObjectMembers]:
+         members = self.get_module_members()
++        inherited_members = self.options.get('inherited_members', set())
+         if want_all:
+             if self.__all__ is None:
+                 # for implicit module members, check __module__ to avoid
+                 # documenting imported objects
+-                return True, list(members.values())
++                return True, [member for member in members.values() if member.class_ not in inherited_members]
+             else:
+                 for member in members.values():
+-                    if member.__name__ not in self.__all__:
++                    if member.__name__ not in self.__all__ or member.class_ in inherited_members:
+                         member.skipped = True
+ 
+-                return False, list(members.values())
++                return False, [member for member in members.values() if not member.skipped]
+         else:
+             memberlist = self.options.members or []
+             ret = []
+             for name in memberlist:
+-                if name in members:
++                if name in members and members[name].class_ not in inherited_members:
+                     ret.append(members[name])
+                 else:
+                     logger.warning(__('missing attribute mentioned in :members: option: '
+@@ -1697,20 +1700,21 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+ 
+     def get_object_members(self, want_all: bool) -> Tuple[bool, ObjectMembers]:
+         members = get_class_members(self.object, self.objpath, self.get_attr)
++        inherited_members_option = self.options.get('inherited_members', set())
+         if not want_all:
+             if not self.options.members:
+                 return False, []  # type: ignore
+             # specific members given
+             selected = []
+             for name in self.options.members:  # type: str
+-                if name in members:
++                if name in members and members[name].class_ not in inherited_members_option:
+                     selected.append(members[name])
+                 else:
+                     logger.warning(__('missing attribute %s in object %s') %
+                                    (name, self.fullname), type='autodoc')
+             return False, selected
+         elif self.options.inherited_members:
+-            return False, list(members.values())
++            return False, [m for m in members.values() if m.class_ not in inherited_members_option]
+         else:
+             return False, [m for m in members.values() if m.class_ == self.object]
+ 
+diff --git a/tox.ini b/tox.ini
+index f0afd779b..30ca90275 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -28,7 +28,7 @@ setenv =
+     PYTHONWARNINGS = all
+     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes
+ commands=
+-    python -X dev -m pytest --durations 25 {posargs}
++    python -X dev -m pytest -rA --durations 25 {posargs}
+ 
+ [testenv:du-latest]
+ commands =
+2024-07-03 21:07:04,777 - INFO - Grading answer for sphinx-doc__sphinx-10325...
+2024-07-03 21:07:04,780 - INFO - report: {'sphinx-doc__sphinx-10325': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['tests/test_ext_autodoc_automodule.py::test_automodule_inherited_members']}, 'PASS_TO_PASS': {'success': ['tests/test_ext_autodoc_automodule.py::test_empty_all', 'tests/test_ext_autodoc_automodule.py::test_automodule', 'tests/test_ext_autodoc_automodule.py::test_automodule_undoc_members', 'tests/test_ext_autodoc_automodule.py::test_automodule_special_members', 'tests/test_ext_autodoc_automodule.py::test_subclass_of_mocked_object'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sphinx-doc__sphinx-10325: resolved: False
+2024-07-03 21:07:04,780 - INFO - Attempting to stop container sweb.eval.sphinx-doc__sphinx-10325.evaluation_201666...
+2024-07-03 21:07:14,267 - INFO - Attempting to remove container sweb.eval.sphinx-doc__sphinx-10325.evaluation_201666...
+2024-07-03 21:07:17,598 - INFO - Container sweb.eval.sphinx-doc__sphinx-10325.evaluation_201666 removed.

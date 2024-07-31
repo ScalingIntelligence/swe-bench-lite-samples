@@ -1,0 +1,211 @@
+2024-07-03 14:16:52,142 - INFO - Environment image sweb.env.x86_64.428468730904ff6b4232aa:latest found for astropy__astropy-12907
+Building instance image sweb.eval.x86_64.astropy__astropy-12907:latest for astropy__astropy-12907
+2024-07-03 14:16:52,145 - INFO - Image sweb.eval.x86_64.astropy__astropy-12907:latest already exists, skipping build.
+2024-07-03 14:16:52,145 - INFO - Creating container for astropy__astropy-12907...
+2024-07-03 14:16:53,571 - INFO - Container for astropy__astropy-12907 created: 54d37d9ecb53b1f8e34fd4dee73f32301d3af2a3c92fbeff212aa825226603a1
+2024-07-03 14:16:57,606 - INFO - Container for astropy__astropy-12907 started: 54d37d9ecb53b1f8e34fd4dee73f32301d3af2a3c92fbeff212aa825226603a1
+2024-07-03 14:16:57,606 - INFO - Intermediate patch for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_169365/model_name_managed_by_server/astropy__astropy-12907/patch.diff, now applying to container...
+2024-07-03 14:16:58,693 - INFO - >>>>> Applied Patch:
+Checking patch astropy/modeling/separable.py...
+Applied patch astropy/modeling/separable.py cleanly.
+
+2024-07-03 14:16:59,909 - INFO - Git diff before:
+diff --git a/astropy/modeling/separable.py b/astropy/modeling/separable.py
+index a308e27297..98999da82b 100644
+--- a/astropy/modeling/separable.py
++++ b/astropy/modeling/separable.py
+@@ -63,43 +63,29 @@ def is_separable(transform):
+     return is_separable
+ 
+ 
+-def separability_matrix(transform):
++def _separable(model):
+     """
+-    Compute the correlation between outputs and inputs.
+-
+-    Parameters
+-    ----------
+-    transform : `~astropy.modeling.core.Model`
+-        A (compound) model.
+-
+-    Returns
+-    -------
+-    separable_matrix : ndarray
+-        A boolean correlation matrix of shape (n_outputs, n_inputs).
+-        Indicates the dependence of outputs on inputs. For completely
+-        independent outputs, the diagonal elements are True and
+-        off-diagonal elements are False.
+-
+-    Examples
+-    --------
+-    >>> from astropy.modeling.models import Shift, Scale, Rotation2D, Polynomial2D
+-    >>> separability_matrix(Shift(1) & Shift(2) | Scale(1) & Scale(2))
+-        array([[ True, False], [False,  True]]...)
+-    >>> separability_matrix(Shift(1) & Shift(2) | Rotation2D(2))
+-        array([[ True,  True], [ True,  True]]...)
+-    >>> separability_matrix(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]) | \
+-        Polynomial2D(1) & Polynomial2D(2))
+-        array([[ True,  True], [ True,  True]]...)
+-    >>> separability_matrix(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]))
+-        array([[ True, False], [False,  True], [ True, False], [False,  True]]...)
+-
++    Recursively handle all components of the model, including nested CompoundModels, to compute the separability matrix correctly.
+     """
+-    if transform.n_inputs == 1 and transform.n_outputs > 1:
+-        return np.ones((transform.n_outputs, transform.n_inputs),
+-                       dtype=np.bool_)
+-    separable_matrix = _separable(transform)
+-    separable_matrix = np.where(separable_matrix != 0, True, False)
+-    return separable_matrix
++    if not isinstance(model, CompoundModel):
++        # For a simple model, assume all outputs are dependent on all inputs
++        return np.ones((model.n_outputs, model.n_inputs), dtype=np.bool_)
++
++    left_separable = _separable(model.left)
++    right_separable = _separable(model.right)
++
++    if model.op == '&':
++        return np.block([
++            [left_separable, np.zeros((model.left.n_outputs, model.right.n_inputs), dtype=np.bool_)],
++            [np.zeros((model.right.n_outputs, model.left.n_inputs), dtype=np.bool_), right_separable]
++        ])
++    elif model.op == '|':
++        return np.any([left_separable, right_separable], axis=0)
++    elif model.op == 'fix_inputs':
++        return left_separable
++    else:
++        # For other operations, assume all outputs are dependent on all inputs
++        return np.ones((model.n_outputs, model.n_inputs), dtype=np.bool_)
+ 
+ 
+ def _compute_n_outputs(left, right):
+@@ -306,7 +292,13 @@ def _separable(transform):
+     elif isinstance(transform, CompoundModel):
+         sepleft = _separable(transform.left)
+         sepright = _separable(transform.right)
+-        return _operators[transform.op](sepleft, sepright)
++        if transform.op == '&':
++            return np.block([[sepleft, np.zeros((sepleft.shape[0], sepright.shape[1]))],
++                             [np.zeros((sepright.shape[0], sepleft.shape[1])), sepright]])
++        elif transform.op == '|':
++            return sepright @ sepleft
++        else:
++            return _operators[transform.op](sepleft, sepright)
+     elif isinstance(transform, Model):
+         return _coord_matrix(transform, 'left', transform.n_outputs)
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 3364d30740..02dddbe713 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,5 +1,5 @@
+ [build-system]
+-requires = ["setuptools",
++requires = ["setuptools==68.0.0",
+             "setuptools_scm>=6.2",
+             "wheel",
+             "cython==0.29.22",
+2024-07-03 14:16:59,909 - INFO - Eval script for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_169365/model_name_managed_by_server/astropy__astropy-12907/patch.diff, now applying to container...
+2024-07-03 14:17:32,070 - INFO - Test output for astropy__astropy-12907 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_169365/model_name_managed_by_server/astropy__astropy-12907/test_output.txt
+2024-07-03 14:17:32,121 - INFO - Git diff after:
+diff --git a/astropy/modeling/separable.py b/astropy/modeling/separable.py
+index a308e27297..98999da82b 100644
+--- a/astropy/modeling/separable.py
++++ b/astropy/modeling/separable.py
+@@ -63,43 +63,29 @@ def is_separable(transform):
+     return is_separable
+ 
+ 
+-def separability_matrix(transform):
++def _separable(model):
+     """
+-    Compute the correlation between outputs and inputs.
+-
+-    Parameters
+-    ----------
+-    transform : `~astropy.modeling.core.Model`
+-        A (compound) model.
+-
+-    Returns
+-    -------
+-    separable_matrix : ndarray
+-        A boolean correlation matrix of shape (n_outputs, n_inputs).
+-        Indicates the dependence of outputs on inputs. For completely
+-        independent outputs, the diagonal elements are True and
+-        off-diagonal elements are False.
+-
+-    Examples
+-    --------
+-    >>> from astropy.modeling.models import Shift, Scale, Rotation2D, Polynomial2D
+-    >>> separability_matrix(Shift(1) & Shift(2) | Scale(1) & Scale(2))
+-        array([[ True, False], [False,  True]]...)
+-    >>> separability_matrix(Shift(1) & Shift(2) | Rotation2D(2))
+-        array([[ True,  True], [ True,  True]]...)
+-    >>> separability_matrix(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]) | \
+-        Polynomial2D(1) & Polynomial2D(2))
+-        array([[ True,  True], [ True,  True]]...)
+-    >>> separability_matrix(Shift(1) & Shift(2) | Mapping([0, 1, 0, 1]))
+-        array([[ True, False], [False,  True], [ True, False], [False,  True]]...)
+-
++    Recursively handle all components of the model, including nested CompoundModels, to compute the separability matrix correctly.
+     """
+-    if transform.n_inputs == 1 and transform.n_outputs > 1:
+-        return np.ones((transform.n_outputs, transform.n_inputs),
+-                       dtype=np.bool_)
+-    separable_matrix = _separable(transform)
+-    separable_matrix = np.where(separable_matrix != 0, True, False)
+-    return separable_matrix
++    if not isinstance(model, CompoundModel):
++        # For a simple model, assume all outputs are dependent on all inputs
++        return np.ones((model.n_outputs, model.n_inputs), dtype=np.bool_)
++
++    left_separable = _separable(model.left)
++    right_separable = _separable(model.right)
++
++    if model.op == '&':
++        return np.block([
++            [left_separable, np.zeros((model.left.n_outputs, model.right.n_inputs), dtype=np.bool_)],
++            [np.zeros((model.right.n_outputs, model.left.n_inputs), dtype=np.bool_), right_separable]
++        ])
++    elif model.op == '|':
++        return np.any([left_separable, right_separable], axis=0)
++    elif model.op == 'fix_inputs':
++        return left_separable
++    else:
++        # For other operations, assume all outputs are dependent on all inputs
++        return np.ones((model.n_outputs, model.n_inputs), dtype=np.bool_)
+ 
+ 
+ def _compute_n_outputs(left, right):
+@@ -306,7 +292,13 @@ def _separable(transform):
+     elif isinstance(transform, CompoundModel):
+         sepleft = _separable(transform.left)
+         sepright = _separable(transform.right)
+-        return _operators[transform.op](sepleft, sepright)
++        if transform.op == '&':
++            return np.block([[sepleft, np.zeros((sepleft.shape[0], sepright.shape[1]))],
++                             [np.zeros((sepright.shape[0], sepleft.shape[1])), sepright]])
++        elif transform.op == '|':
++            return sepright @ sepleft
++        else:
++            return _operators[transform.op](sepleft, sepright)
+     elif isinstance(transform, Model):
+         return _coord_matrix(transform, 'left', transform.n_outputs)
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 3364d30740..02dddbe713 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,5 +1,5 @@
+ [build-system]
+-requires = ["setuptools",
++requires = ["setuptools==68.0.0",
+             "setuptools_scm>=6.2",
+             "wheel",
+             "cython==0.29.22",
+2024-07-03 14:17:32,121 - INFO - Grading answer for astropy__astropy-12907...
+2024-07-03 14:17:32,124 - INFO - report: {'astropy__astropy-12907': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['astropy/modeling/tests/test_separable.py::test_separable[compound_model6-result6]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model9-result9]']}, 'PASS_TO_PASS': {'success': [], 'failure': ['astropy/modeling/tests/test_separable.py::test_coord_matrix', 'astropy/modeling/tests/test_separable.py::test_cdot', 'astropy/modeling/tests/test_separable.py::test_cstack', 'astropy/modeling/tests/test_separable.py::test_arith_oper', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model0-result0]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model1-result1]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model2-result2]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model3-result3]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model4-result4]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model5-result5]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model7-result7]', 'astropy/modeling/tests/test_separable.py::test_separable[compound_model8-result8]', 'astropy/modeling/tests/test_separable.py::test_custom_model_separable']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for astropy__astropy-12907: resolved: False
+2024-07-03 14:17:32,124 - INFO - Attempting to stop container sweb.eval.astropy__astropy-12907.evaluation_169365...
+2024-07-03 14:17:37,102 - INFO - Attempting to remove container sweb.eval.astropy__astropy-12907.evaluation_169365...
+2024-07-03 14:17:37,788 - INFO - Container sweb.eval.astropy__astropy-12907.evaluation_169365 removed.

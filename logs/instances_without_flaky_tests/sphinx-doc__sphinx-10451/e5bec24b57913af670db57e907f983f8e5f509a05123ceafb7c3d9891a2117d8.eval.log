@@ -1,0 +1,167 @@
+2024-07-03 14:00:44,745 - INFO - Environment image sweb.env.x86_64.1b3b218535da0abf4469cb:latest found for sphinx-doc__sphinx-10451
+Building instance image sweb.eval.x86_64.sphinx-doc__sphinx-10451:latest for sphinx-doc__sphinx-10451
+2024-07-03 14:00:44,746 - INFO - Image sweb.eval.x86_64.sphinx-doc__sphinx-10451:latest already exists, skipping build.
+2024-07-03 14:00:44,746 - INFO - Creating container for sphinx-doc__sphinx-10451...
+2024-07-03 14:00:47,644 - INFO - Container for sphinx-doc__sphinx-10451 created: 13648bae33229e291cfa1d945bd78b9fc02f4c4711fa72744d68c00b79cb035d
+2024-07-03 14:00:53,750 - INFO - Container for sphinx-doc__sphinx-10451 started: 13648bae33229e291cfa1d945bd78b9fc02f4c4711fa72744d68c00b79cb035d
+2024-07-03 14:00:53,758 - INFO - Intermediate patch for sphinx-doc__sphinx-10451 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_168315/model_name_managed_by_server/sphinx-doc__sphinx-10451/patch.diff, now applying to container...
+2024-07-03 14:00:55,052 - INFO - >>>>> Applied Patch:
+Checking patch sphinx/ext/autodoc/__init__.py...
+Applied patch sphinx/ext/autodoc/__init__.py cleanly.
+
+2024-07-03 14:00:55,725 - INFO - Git diff before:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index e16ab8ce5..3c69514b1 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1561,16 +1561,51 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+             result = (result[0], None)
+ 
+         for i, sig in enumerate(self._signatures):
+-            if sig.endswith(' -> None'):
+-                # Strip a return value from signatures of constructor in docstring (subsequent
+-                # entries)
+-                self._signatures[i] = sig[:-8]
++            if any(parameter.kind in {inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL}
++                   for parameter in inspect.signature(self.object).parameters.values()):
++                self._signatures[i] = re.sub(r'\s+->\s+None', '', sig)
++                sig_params = re.split(r'\s*[,\(]\s*', sig)[1:-1]  # Split and remove parenthesis and return type
++                new_sig_params = []
++                for j, param in enumerate(sig_params):
++                    if param.startswith('*'):
++                        # Remove any type hint from *args and **kwargs
++                        param = re.sub(r':\s*[^:]+', '', param)
++                    new_sig_params.append(param)
++                self._signatures[i] = '(' + ', '.join(new_sig_params) + ')'
+ 
+         return result
+ 
+     def format_signature(self, **kwargs: Any) -> str:
+         if self.doc_as_attr:
+             return ''
++
++        sigs = []
++        sig = super().format_signature(**kwargs)
++        sigs.append(sig)
++
++        # Check for duplicated *args and **kwargs and merge them if necessary
++        merged_args = {}
++        for sig in sigs:
++            matched = re.match(r'^(\(.*\))\s+->\s+(.*)$', sig)
++            if matched:
++                args = matched.group(1)
++                retann = matched.group(2)
++                parsed_args = inspect.signature(args)
++                for param in parsed_args.parameters.values():
++                    if param.name in merged_args:
++                        # Skip duplicate parameters
++                        continue
++                    merged_args[param.name] = param
++
++        # Rebuild the signature without duplicates
++        merged_sig = '('
++        for param in merged_args.values():
++            merged_sig += stringify_signature(param) + ', '
++        merged_sig = merged_sig.rstrip(', ') + ')'
++        merged_sig += (' -> %s' % retann) if retann else ''
++
++        return merged_sig
++            return ''
+         if self.config.autodoc_class_signature == 'separated':
+             # do not show signatures
+             return ''
+diff --git a/tox.ini b/tox.ini
+index 105a02597..90ada0821 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -29,7 +29,7 @@ setenv =
+     PYTHONWARNINGS = all
+     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes
+ commands=
+-    python -X dev -X warn_default_encoding -m pytest --durations 25 {posargs}
++    python -X dev -X warn_default_encoding -m pytest -rA --durations 25 {posargs}
+ 
+ [testenv:du-latest]
+ commands =
+2024-07-03 14:00:55,747 - INFO - Eval script for sphinx-doc__sphinx-10451 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_168315/model_name_managed_by_server/sphinx-doc__sphinx-10451/patch.diff, now applying to container...
+2024-07-03 14:01:50,589 - INFO - Test output for sphinx-doc__sphinx-10451 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_168315/model_name_managed_by_server/sphinx-doc__sphinx-10451/test_output.txt
+2024-07-03 14:01:50,667 - INFO - Git diff after:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index e16ab8ce5..3c69514b1 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1561,16 +1561,51 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+             result = (result[0], None)
+ 
+         for i, sig in enumerate(self._signatures):
+-            if sig.endswith(' -> None'):
+-                # Strip a return value from signatures of constructor in docstring (subsequent
+-                # entries)
+-                self._signatures[i] = sig[:-8]
++            if any(parameter.kind in {inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL}
++                   for parameter in inspect.signature(self.object).parameters.values()):
++                self._signatures[i] = re.sub(r'\s+->\s+None', '', sig)
++                sig_params = re.split(r'\s*[,\(]\s*', sig)[1:-1]  # Split and remove parenthesis and return type
++                new_sig_params = []
++                for j, param in enumerate(sig_params):
++                    if param.startswith('*'):
++                        # Remove any type hint from *args and **kwargs
++                        param = re.sub(r':\s*[^:]+', '', param)
++                    new_sig_params.append(param)
++                self._signatures[i] = '(' + ', '.join(new_sig_params) + ')'
+ 
+         return result
+ 
+     def format_signature(self, **kwargs: Any) -> str:
+         if self.doc_as_attr:
+             return ''
++
++        sigs = []
++        sig = super().format_signature(**kwargs)
++        sigs.append(sig)
++
++        # Check for duplicated *args and **kwargs and merge them if necessary
++        merged_args = {}
++        for sig in sigs:
++            matched = re.match(r'^(\(.*\))\s+->\s+(.*)$', sig)
++            if matched:
++                args = matched.group(1)
++                retann = matched.group(2)
++                parsed_args = inspect.signature(args)
++                for param in parsed_args.parameters.values():
++                    if param.name in merged_args:
++                        # Skip duplicate parameters
++                        continue
++                    merged_args[param.name] = param
++
++        # Rebuild the signature without duplicates
++        merged_sig = '('
++        for param in merged_args.values():
++            merged_sig += stringify_signature(param) + ', '
++        merged_sig = merged_sig.rstrip(', ') + ')'
++        merged_sig += (' -> %s' % retann) if retann else ''
++
++        return merged_sig
++            return ''
+         if self.config.autodoc_class_signature == 'separated':
+             # do not show signatures
+             return ''
+diff --git a/tox.ini b/tox.ini
+index 105a02597..90ada0821 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -29,7 +29,7 @@ setenv =
+     PYTHONWARNINGS = all
+     PYTEST_ADDOPTS = {env:PYTEST_ADDOPTS:} --color yes
+ commands=
+-    python -X dev -X warn_default_encoding -m pytest --durations 25 {posargs}
++    python -X dev -X warn_default_encoding -m pytest -rA --durations 25 {posargs}
+ 
+ [testenv:du-latest]
+ commands =
+2024-07-03 14:01:50,671 - INFO - Grading answer for sphinx-doc__sphinx-10451...
+2024-07-03 14:01:50,674 - INFO - report: {'sphinx-doc__sphinx-10451': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['tests/test_ext_napoleon_docstring.py::test_napoleon_and_autodoc_typehints_description_all', 'tests/test_ext_napoleon_docstring.py::test_napoleon_and_autodoc_typehints_description_documented_params']}, 'PASS_TO_PASS': {'success': [], 'failure': ['tests/test_ext_autodoc_configs.py::test_autoclass_content_class', 'tests/test_ext_autodoc_configs.py::test_autoclass_content_init', 'tests/test_ext_autodoc_configs.py::test_autodoc_class_signature_mixed', 'tests/test_ext_autodoc_configs.py::test_autodoc_class_signature_separated_init', 'tests/test_ext_autodoc_configs.py::test_autodoc_class_signature_separated_new', 'tests/test_ext_autodoc_configs.py::test_autoclass_content_both', 'tests/test_ext_autodoc_configs.py::test_autodoc_inherit_docstrings', 'tests/test_ext_autodoc_configs.py::test_autodoc_docstring_signature', 'tests/test_ext_autodoc_configs.py::test_autoclass_content_and_docstring_signature_class', 'tests/test_ext_autodoc_configs.py::test_autoclass_content_and_docstring_signature_init', 'tests/test_ext_autodoc_configs.py::test_autoclass_content_and_docstring_signature_both', 'tests/test_ext_autodoc_configs.py::test_mocked_module_imports', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_signature', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_none', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_none_for_overload', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_no_undoc', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_no_undoc_doc_rtype', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init_no_undoc', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_with_documented_init_no_undoc_doc_rtype', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_for_invalid_node', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_both', 'tests/test_ext_autodoc_configs.py::test_autodoc_type_aliases', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_description_and_type_aliases', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_format_fully_qualified', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_format_fully_qualified_for_class_alias', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_format_fully_qualified_for_generic_alias', 'tests/test_ext_autodoc_configs.py::test_autodoc_typehints_format_fully_qualified_for_newtype_alias', 'tests/test_ext_autodoc_configs.py::test_autodoc_default_options', 'tests/test_ext_autodoc_configs.py::test_autodoc_default_options_with_values', 'tests/test_ext_napoleon_docstring.py::NamedtupleSubclassTest::test_attributes_docstring', 'tests/test_ext_napoleon_docstring.py::InlineAttributeTest::test_class_data_member', 'tests/test_ext_napoleon_docstring.py::InlineAttributeTest::test_class_data_member_inline', 'tests/test_ext_napoleon_docstring.py::InlineAttributeTest::test_class_data_member_inline_no_type', 'tests/test_ext_napoleon_docstring.py::InlineAttributeTest::test_class_data_member_inline_ref_in_type', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_attributes_with_class_reference', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_attributes_with_use_ivar', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_code_block_in_returns_section', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_colon_in_return_type', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_custom_generic_sections', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_docstrings', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_keywords_with_types', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_kwargs_in_arguments', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_list_in_parameter_description', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_noindex', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_parameters_with_class_reference', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_pep526_annotations', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_preprocess_types', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_raises_types', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_section_header_formatting', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_sphinx_admonitions', 'tests/test_ext_napoleon_docstring.py::GoogleDocstringTest::test_xrefs_in_return_type', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_colon_in_return_type', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_convert_numpy_type_spec', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_docstrings', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_list_in_parameter_description', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_multiple_parameters', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_parameter_types', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_parameters_with_class_reference', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_parameters_without_class_reference', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_raises_types', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_recombine_set_tokens', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_recombine_set_tokens_invalid', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_return_types', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_section_header_underline_length', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_see_also_refs', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_sphinx_admonitions', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_token_type', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_tokenize_type_spec', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_type_preprocessor', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_underscore_in_attribute', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_underscore_in_attribute_strip_signature_backslash', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_xrefs_in_return_type', 'tests/test_ext_napoleon_docstring.py::NumpyDocstringTest::test_yield_types', 'tests/test_ext_napoleon_docstring.py::TestNumpyDocstring::test_token_type_invalid', 'tests/test_ext_napoleon_docstring.py::TestNumpyDocstring::test_escape_args_and_kwargs[x,', 'tests/test_ext_napoleon_docstring.py::TestNumpyDocstring::test_escape_args_and_kwargs[*args,', 'tests/test_ext_napoleon_docstring.py::TestNumpyDocstring::test_escape_args_and_kwargs[*x,', 'tests/test_ext_napoleon_docstring.py::TestNumpyDocstring::test_pep526_annotations']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sphinx-doc__sphinx-10451: resolved: False
+2024-07-03 14:01:50,674 - INFO - Attempting to stop container sweb.eval.sphinx-doc__sphinx-10451.evaluation_168315...
+2024-07-03 14:01:56,869 - INFO - Attempting to remove container sweb.eval.sphinx-doc__sphinx-10451.evaluation_168315...
+2024-07-03 14:02:00,439 - INFO - Container sweb.eval.sphinx-doc__sphinx-10451.evaluation_168315 removed.

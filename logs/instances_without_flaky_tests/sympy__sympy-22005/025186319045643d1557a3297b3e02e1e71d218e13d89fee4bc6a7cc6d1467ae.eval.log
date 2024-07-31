@@ -1,0 +1,345 @@
+2024-07-03 04:29:47,544 - INFO - Environment image sweb.env.x86_64.c795f4b88616b8462021ed:latest found for sympy__sympy-22005
+Building instance image sweb.eval.x86_64.sympy__sympy-22005:latest for sympy__sympy-22005
+2024-07-03 04:29:47,547 - INFO - Image sweb.eval.x86_64.sympy__sympy-22005:latest already exists, skipping build.
+2024-07-03 04:29:47,547 - INFO - Creating container for sympy__sympy-22005...
+2024-07-03 04:29:47,899 - INFO - Container for sympy__sympy-22005 created: 512f0e4479325df6654f8bd0090b885fac99dba7533da6c9e38d53d3dad52005
+2024-07-03 04:29:48,129 - INFO - Container for sympy__sympy-22005 started: 512f0e4479325df6654f8bd0090b885fac99dba7533da6c9e38d53d3dad52005
+2024-07-03 04:29:48,129 - INFO - Intermediate patch for sympy__sympy-22005 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_144234/model_name_managed_by_server/sympy__sympy-22005/patch.diff, now applying to container...
+2024-07-03 04:29:48,326 - INFO - >>>>> Applied Patch:
+Checking patch sympy/solvers/polysys.py...
+Applied patch sympy/solvers/polysys.py cleanly.
+
+2024-07-03 04:29:49,093 - INFO - Git diff before:
+diff --git a/sympy/solvers/polysys.py b/sympy/solvers/polysys.py
+index b9809fd4e9..94bcbdbee6 100644
+--- a/sympy/solvers/polysys.py
++++ b/sympy/solvers/polysys.py
+@@ -58,7 +58,7 @@ def solve_poly_system(seq, *gens, **args):
+             try:
+                 return solve_biquadratic(f, g, opt)
+             except SolveFailed:
+-                pass
++                raise NotImplementedError('only zero-dimensional systems supported (finite number of solutions)')
+ 
+     return solve_generic(polys, opt)
+ 
+@@ -132,6 +132,8 @@ def solve_biquadratic(f, g, opt):
+     return sorted(solutions, key=default_sort_key)
+ 
+ 
++from sympy.polys.polyutils import _is_zero_dimensional
++
+ def solve_generic(polys, opt):
+     """
+     Solve a generic system of polynomial equations.
+@@ -207,79 +209,85 @@ def solve_generic(polys, opt):
+     >>> solve_generic([a, b], NewOption)
+     [(0, 0), (1/4, -1/16)]
+     """
+-    def _is_univariate(f):
+-        """Returns True if 'f' is univariate in its last variable. """
+-        for monom in f.monoms():
+-            if any(monom[:-1]):
+-                return False
++def _is_univariate(f):
++    """Returns True if 'f' is univariate in its last variable. """
++    for monom in f.monoms():
++        if any(monom[:-1]):
++            return False
+ 
+-        return True
++    return True
+ 
+-    def _subs_root(f, gen, zero):
+-        """Replace generator with a root so that the result is nice. """
+-        p = f.as_expr({gen: zero})
++def _subs_root(f, gen, zero):
++    """Replace generator with a root so that the result is nice. """
++    p = f.as_expr({gen: zero})
+ 
+-        if f.degree(gen) >= 2:
+-            p = p.expand(deep=False)
++    if f.degree(gen) >= 2:
++        p = p.expand(deep=False)
+ 
+-        return p
++    return p
+ 
+-    def _solve_reduced_system(system, gens, entry=False):
+-        """Recursively solves reduced polynomial systems. """
+-        if len(system) == len(gens) == 1:
+-            zeros = list(roots(system[0], gens[-1]).keys())
+-            return [(zero,) for zero in zeros]
++def _solve_reduced_system(system, gens, entry=False):
++    """Recursively solves reduced polynomial systems. """
++    if len(system) == len(gens) == 1:
++        zeros = list(roots(system[0], gens[-1]).keys())
++        return [(zero,) for zero in zeros]
+ 
+-        basis = groebner(system, gens, polys=True)
++    basis = groebner(system, gens, polys=True)
+ 
+-        if len(basis) == 1 and basis[0].is_ground:
+-            if not entry:
+-                return []
+-            else:
+-                return None
++    if len(basis) == 1 and basis[0].is_ground:
++        if not entry:
++            return []
++        else:
++            return None
+ 
+-        univariate = list(filter(_is_univariate, basis))
++    if not _is_zero_dimensional(basis, gens):
++        raise NotImplementedError(filldedent('''
++            only zero-dimensional systems supported
++            (finite number of solutions)
++            '''))
+ 
+-        if len(univariate) == 1:
+-            f = univariate.pop()
+-        else:
+-            raise NotImplementedError(filldedent('''
+-                only zero-dimensional systems supported
+-                (finite number of solutions)
+-                '''))
++    univariate = list(filter(_is_univariate, basis))
+ 
+-        gens = f.gens
+-        gen = gens[-1]
++    if len(univariate) == 1:
++        f = univariate.pop()
++    else:
++        raise NotImplementedError(filldedent('''
++            only zero-dimensional systems supported
++            (finite number of solutions)
++            '''))
+ 
+-        zeros = list(roots(f.ltrim(gen)).keys())
++    gens = f.gens
++    gen = gens[-1]
+ 
+-        if not zeros:
+-            return []
++    zeros = list(roots(f.ltrim(gen)).keys())
++
++    if not zeros:
++        return []
+ 
+-        if len(basis) == 1:
+-            return [(zero,) for zero in zeros]
++    if len(basis) == 1:
++        return [(zero,) for zero in zeros]
+ 
+-        solutions = []
++    solutions = []
+ 
+-        for zero in zeros:
+-            new_system = []
+-            new_gens = gens[:-1]
++    for zero in zeros:
++        new_system = []
++        new_gens = gens[:-1]
+ 
+-            for b in basis[:-1]:
+-                eq = _subs_root(b, gen, zero)
++        for b in basis[:-1]:
++            eq = _subs_root(b, gen, zero)
+ 
+-                if eq is not S.Zero:
+-                    new_system.append(eq)
++            if eq is not S.Zero:
++                new_system.append(eq)
+ 
+-            for solution in _solve_reduced_system(new_system, new_gens):
+-                solutions.append(solution + (zero,))
++        for solution in _solve_reduced_system(new_system, new_gens):
++            solutions.append(solution + (zero,))
+ 
+-        if solutions and len(solutions[0]) != len(gens):
+-            raise NotImplementedError(filldedent('''
+-                only zero-dimensional systems supported
+-                (finite number of solutions)
+-                '''))
+-        return solutions
++    if solutions and len(solutions[0]) != len(gens):
++        raise NotImplementedError(filldedent('''
++            only zero-dimensional systems supported
++            (finite number of solutions)
++            '''))
++    return solutions
+ 
+     try:
+         result = _solve_reduced_system(polys, opt.gens, entry=True)
+2024-07-03 04:29:49,094 - INFO - Eval script for sympy__sympy-22005 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_144234/model_name_managed_by_server/sympy__sympy-22005/patch.diff, now applying to container...
+2024-07-03 04:29:52,565 - INFO - Test output for sympy__sympy-22005 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_144234/model_name_managed_by_server/sympy__sympy-22005/test_output.txt
+2024-07-03 04:29:52,615 - INFO - Git diff after:
+diff --git a/sympy/solvers/polysys.py b/sympy/solvers/polysys.py
+index b9809fd4e9..94bcbdbee6 100644
+--- a/sympy/solvers/polysys.py
++++ b/sympy/solvers/polysys.py
+@@ -58,7 +58,7 @@ def solve_poly_system(seq, *gens, **args):
+             try:
+                 return solve_biquadratic(f, g, opt)
+             except SolveFailed:
+-                pass
++                raise NotImplementedError('only zero-dimensional systems supported (finite number of solutions)')
+ 
+     return solve_generic(polys, opt)
+ 
+@@ -132,6 +132,8 @@ def solve_biquadratic(f, g, opt):
+     return sorted(solutions, key=default_sort_key)
+ 
+ 
++from sympy.polys.polyutils import _is_zero_dimensional
++
+ def solve_generic(polys, opt):
+     """
+     Solve a generic system of polynomial equations.
+@@ -207,79 +209,85 @@ def solve_generic(polys, opt):
+     >>> solve_generic([a, b], NewOption)
+     [(0, 0), (1/4, -1/16)]
+     """
+-    def _is_univariate(f):
+-        """Returns True if 'f' is univariate in its last variable. """
+-        for monom in f.monoms():
+-            if any(monom[:-1]):
+-                return False
++def _is_univariate(f):
++    """Returns True if 'f' is univariate in its last variable. """
++    for monom in f.monoms():
++        if any(monom[:-1]):
++            return False
+ 
+-        return True
++    return True
+ 
+-    def _subs_root(f, gen, zero):
+-        """Replace generator with a root so that the result is nice. """
+-        p = f.as_expr({gen: zero})
++def _subs_root(f, gen, zero):
++    """Replace generator with a root so that the result is nice. """
++    p = f.as_expr({gen: zero})
+ 
+-        if f.degree(gen) >= 2:
+-            p = p.expand(deep=False)
++    if f.degree(gen) >= 2:
++        p = p.expand(deep=False)
+ 
+-        return p
++    return p
+ 
+-    def _solve_reduced_system(system, gens, entry=False):
+-        """Recursively solves reduced polynomial systems. """
+-        if len(system) == len(gens) == 1:
+-            zeros = list(roots(system[0], gens[-1]).keys())
+-            return [(zero,) for zero in zeros]
++def _solve_reduced_system(system, gens, entry=False):
++    """Recursively solves reduced polynomial systems. """
++    if len(system) == len(gens) == 1:
++        zeros = list(roots(system[0], gens[-1]).keys())
++        return [(zero,) for zero in zeros]
+ 
+-        basis = groebner(system, gens, polys=True)
++    basis = groebner(system, gens, polys=True)
+ 
+-        if len(basis) == 1 and basis[0].is_ground:
+-            if not entry:
+-                return []
+-            else:
+-                return None
++    if len(basis) == 1 and basis[0].is_ground:
++        if not entry:
++            return []
++        else:
++            return None
+ 
+-        univariate = list(filter(_is_univariate, basis))
++    if not _is_zero_dimensional(basis, gens):
++        raise NotImplementedError(filldedent('''
++            only zero-dimensional systems supported
++            (finite number of solutions)
++            '''))
+ 
+-        if len(univariate) == 1:
+-            f = univariate.pop()
+-        else:
+-            raise NotImplementedError(filldedent('''
+-                only zero-dimensional systems supported
+-                (finite number of solutions)
+-                '''))
++    univariate = list(filter(_is_univariate, basis))
+ 
+-        gens = f.gens
+-        gen = gens[-1]
++    if len(univariate) == 1:
++        f = univariate.pop()
++    else:
++        raise NotImplementedError(filldedent('''
++            only zero-dimensional systems supported
++            (finite number of solutions)
++            '''))
+ 
+-        zeros = list(roots(f.ltrim(gen)).keys())
++    gens = f.gens
++    gen = gens[-1]
+ 
+-        if not zeros:
+-            return []
++    zeros = list(roots(f.ltrim(gen)).keys())
++
++    if not zeros:
++        return []
+ 
+-        if len(basis) == 1:
+-            return [(zero,) for zero in zeros]
++    if len(basis) == 1:
++        return [(zero,) for zero in zeros]
+ 
+-        solutions = []
++    solutions = []
+ 
+-        for zero in zeros:
+-            new_system = []
+-            new_gens = gens[:-1]
++    for zero in zeros:
++        new_system = []
++        new_gens = gens[:-1]
+ 
+-            for b in basis[:-1]:
+-                eq = _subs_root(b, gen, zero)
++        for b in basis[:-1]:
++            eq = _subs_root(b, gen, zero)
+ 
+-                if eq is not S.Zero:
+-                    new_system.append(eq)
++            if eq is not S.Zero:
++                new_system.append(eq)
+ 
+-            for solution in _solve_reduced_system(new_system, new_gens):
+-                solutions.append(solution + (zero,))
++        for solution in _solve_reduced_system(new_system, new_gens):
++            solutions.append(solution + (zero,))
+ 
+-        if solutions and len(solutions[0]) != len(gens):
+-            raise NotImplementedError(filldedent('''
+-                only zero-dimensional systems supported
+-                (finite number of solutions)
+-                '''))
+-        return solutions
++    if solutions and len(solutions[0]) != len(gens):
++        raise NotImplementedError(filldedent('''
++            only zero-dimensional systems supported
++            (finite number of solutions)
++            '''))
++    return solutions
+ 
+     try:
+         result = _solve_reduced_system(polys, opt.gens, entry=True)
+2024-07-03 04:29:52,615 - INFO - Grading answer for sympy__sympy-22005...
+2024-07-03 04:29:52,616 - INFO - report: {'sympy__sympy-22005': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_solve_poly_system']}, 'PASS_TO_PASS': {'success': [], 'failure': ['test_solve_biquadratic', 'test_solve_triangulated']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sympy__sympy-22005: resolved: False
+2024-07-03 04:29:52,616 - INFO - Attempting to stop container sweb.eval.sympy__sympy-22005.evaluation_144234...
+2024-07-03 04:29:55,528 - INFO - Attempting to remove container sweb.eval.sympy__sympy-22005.evaluation_144234...
+2024-07-03 04:29:55,622 - INFO - Container sweb.eval.sympy__sympy-22005.evaluation_144234 removed.

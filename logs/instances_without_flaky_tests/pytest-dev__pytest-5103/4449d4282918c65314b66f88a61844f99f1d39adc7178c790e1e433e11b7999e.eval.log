@@ -1,0 +1,429 @@
+2024-07-03 02:44:30,740 - INFO - Environment image sweb.env.x86_64.756beac07713d7e8dc1129:latest found for pytest-dev__pytest-5103
+Building instance image sweb.eval.x86_64.pytest-dev__pytest-5103:latest for pytest-dev__pytest-5103
+2024-07-03 02:44:30,751 - INFO - Image sweb.eval.x86_64.pytest-dev__pytest-5103:latest already exists, skipping build.
+2024-07-03 02:44:30,752 - INFO - Creating container for pytest-dev__pytest-5103...
+2024-07-03 02:44:32,602 - INFO - Container for pytest-dev__pytest-5103 created: 47e541f1ea4b33148e69eeaee1c9125af6b6d183f76fcbb3204b61d3fc97bbb9
+2024-07-03 02:44:33,285 - INFO - Container for pytest-dev__pytest-5103 started: 47e541f1ea4b33148e69eeaee1c9125af6b6d183f76fcbb3204b61d3fc97bbb9
+2024-07-03 02:44:33,285 - INFO - Intermediate patch for pytest-dev__pytest-5103 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_137648/model_name_managed_by_server/pytest-dev__pytest-5103/patch.diff, now applying to container...
+2024-07-03 02:44:33,516 - INFO - >>>>> Applied Patch:
+Checking patch src/_pytest/assertion/rewrite.py...
+Applied patch src/_pytest/assertion/rewrite.py cleanly.
+
+2024-07-03 02:44:33,719 - INFO - Git diff before:
+diff --git a/src/_pytest/assertion/rewrite.py b/src/_pytest/assertion/rewrite.py
+index 2903b8995..afd812d81 100644
+--- a/src/_pytest/assertion/rewrite.py
++++ b/src/_pytest/assertion/rewrite.py
+@@ -811,58 +811,76 @@ class AssertionRewriter(ast.NodeVisitor):
+         res = self.assign(node)
+         return res, self.explanation_param(self.display(res))
+ 
+-    def visit_Assert(self, assert_):
+-        """Return the AST statements to replace the ast.Assert instance.
+-
+-        This rewrites the test of an assertion to provide
+-        intermediate values and replace it with an if statement which
+-        raises an assertion error with a detailed explanation in case
+-        the expression is false.
+-
+-        """
+-        if isinstance(assert_.test, ast.Tuple) and len(assert_.test.elts) >= 1:
+-            from _pytest.warning_types import PytestAssertRewriteWarning
+-            import warnings
+-
+-            warnings.warn_explicit(
+-                PytestAssertRewriteWarning(
+-                    "assertion is always true, perhaps remove parentheses?"
+-                ),
+-                category=None,
+-                filename=str(self.module_path),
+-                lineno=assert_.lineno,
+-            )
+-
+         self.statements = []
+         self.variables = []
+         self.variable_counter = itertools.count()
+         self.stack = []
+         self.on_failure = []
+         self.push_format_context()
++        class AssertionRewriter(ast.NodeVisitor):
++            def unroll_allany(condition, iter_expr, func):
++                iter_var = self.variable()
++                iter_expr, iter_expl = self.visit(iter_expr)
++                done_var = self.variable()
++                self.statements.append(ast.Assign([ast.Name(done_var, ast.Store())], ast.NameConstant(False)))
++                loop_body = []
++                elem_var = self.variable()
++                elem_cond_var = self.variable()
++                comp_var = self.variable()
++                loop_body.append(ast.Assign([ast.Name(elem_var, ast.Store())], ast.Subscript(iter_expr, ast.Index(ast.Num(0)), ast.Load())))
++                loop_body.append(ast.Assign([ast.Name(elem_cond_var, ast.Store())], func(ast.Name(elem_var, ast.Load()))))
++                loop_body.append(ast.Assign([ast.Name(done_var, ast.Store())], elem_cond_var))
++                loop_body.append(ast.If(ast.UnaryOp(ast.Not(), ast.Name(done_var, ast.Load())), [ast.Break()], []))
++                loop_body.append(ast.AugAssign(iter_expr, ast.Sub, ast.Num(1)))
++                loop = ast.For(ast.Name(comp_var, ast.Store()), iter_expr, loop_body, [])
++                self.statements.append(loop)
++                return ast.Name(done_var, ast.Load())
+         # Rewrite assert into a bunch of statements.
+-        top_condition, explanation = self.visit(assert_.test)
+-        # If in a test module, check if directly asserting None, in order to warn [Issue #3191]
+-        if self.module_path is not None:
+-            self.statements.append(
+-                self.warn_about_none_ast(
+-                    top_condition, module_path=self.module_path, lineno=assert_.lineno
+-                )
++    top_condition, explanation = self.visit(assert_.test)
++    # If in a test module, check if directly asserting None, in order to warn [Issue #3191]
++    if self.module_path is not None:
++        self.statements.append(
++            self.warn_about_none_ast(
++                top_condition, module_path=self.module_path, lineno=assert_.lineno
+             )
+-        # Create failure message.
+-        body = self.on_failure
+-        negation = ast.UnaryOp(ast.Not(), top_condition)
+-        self.statements.append(ast.If(negation, body, []))
+-        if assert_.msg:
+-            assertmsg = self.helper("_format_assertmsg", assert_.msg)
+-            explanation = "\n>assert " + explanation
+-        else:
+-            assertmsg = ast.Str("")
+-            explanation = "assert " + explanation
+-        template = ast.BinOp(assertmsg, ast.Add(), ast.Str(explanation))
+-        msg = self.pop_format_context(template)
+-        fmt = self.helper("_format_explanation", msg)
+-        err_name = ast.Name("AssertionError", ast.Load())
+-        exc = ast_Call(err_name, [fmt], [])
++        )
++    # Create failure message.
++    body = self.on_failure
++
++    def unroll_allany(condition, iter_expr, func):
++        iter_var = self.variable()
++        iter_expr, iter_expl = self.visit(iter_expr)
++        done_var = self.variable()
++        self.statements.append(ast.Assign([ast.Name(done_var, ast.Store())], ast.NameConstant(False)))
++        loop_body = []
++        elem_var = self.variable()
++        elem_cond_var = self.variable()
++        comp_var = self.variable()
++        loop_body.append(ast.Assign([ast.Name(elem_var, ast.Store())], ast.Subscript(iter_expr, ast.Index(ast.Num(0)), ast.Load())))
++        loop_body.append(ast.Assign([ast.Name(elem_cond_var, ast.Store())], func(ast.Name(elem_var, ast.Load()))))
++        loop_body.append(ast.Assign([ast.Name(done_var, ast.Store())], elem_cond_var))
++        loop_body.append(ast.If(ast.UnaryOp(ast.Not(), ast.Name(done_var, ast.Load())), [ast.Break()], []))
++        loop_body.append(ast.AugAssign(iter_expr, ast.Sub, ast.Num(1)))
++        loop = ast.For(ast.Name(comp_var, ast.Store()), iter_expr, loop_body, [])
++        self.statements.append(loop)
++        return ast.Name(done_var, ast.Load())
++
++    if isinstance(top_condition, ast.Call) and isinstance(top_condition.func, ast.Name) and top_condition.func.id in ['all', 'any']:
++        top_condition = unroll_allany(top_condition, top_condition.args[0], self.builtin(top_condition.func.id))
++
++    negation = ast.UnaryOp(ast.Not(), top_condition)
++    self.statements.append(ast.If(negation, body, []))
++    if assert_.msg:
++        assertmsg = self.helper("_format_assertmsg", assert_.msg)
++        explanation = "\n>assert " + explanation
++    else:
++        assertmsg = ast.Str("")
++        explanation = "assert " + explanation
++    template = ast.BinOp(assertmsg, ast.Add(), ast.Str(explanation))
++    msg = self.pop_format_context(template)
++    fmt = self.helper("_format_explanation", msg)
++    err_name = ast.Name("AssertionError", ast.Load())
++    exc = ast_Call(err_name, [fmt], [])
+         if sys.version_info[0] >= 3:
+             raise_ = ast.Raise(exc, None)
+         else:
+@@ -905,15 +923,69 @@ warn_explicit(
+         ).body
+         return ast.If(val_is_none, send_warning, [])
+ 
+-    def visit_Name(self, name):
+-        # Display the repr of the name if it's a local variable or
+-        # _should_repr_global_name() thinks it's acceptable.
+-        locs = ast_Call(self.builtin("locals"), [], [])
+-        inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])
+-        dorepr = self.helper("_should_repr_global_name", name)
+-        test = ast.BoolOp(ast.Or(), [inlocs, dorepr])
+-        expr = ast.IfExp(test, self.display(name), ast.Str(name.id))
+-        return name, self.explanation_param(expr)
++    def visit_Assert(self, assert_):
++        def unroll_allany(condition, iter_expr, func):
++            iter_var = self.variable()
++            iter_expr, iter_expl = self.visit(iter_expr)
++            done_var = self.variable()
++            self.statements.append(ast.Assign([ast.Name(done_var, ast.Store())], ast.NameConstant(False)))
++            loop_body = []
++            elem_var = self.variable()
++            elem_cond_var = self.variable()
++            comp_var = self.variable()
++            loop_body.append(ast.Assign([ast.Name(elem_var, ast.Store())], ast.Subscript(iter_expr, ast.Index(ast.Num(0)), ast.Load())))
++            loop_body.append(ast.Assign([ast.Name(elem_cond_var, ast.Store())], func(ast.Name(elem_var, ast.Load()))))
++            loop_body.append(ast.Assign([ast.Name(done_var, ast.Store())], elem_cond_var))
++            loop_body.append(ast.If(ast.UnaryOp(ast.Not(), ast.Name(done_var, ast.Load())), [ast.Break()], []))
++            loop_body.append(ast.AugAssign(iter_expr, ast.Sub, ast.Num(1)))
++            loop = ast.For(ast.Name(comp_var, ast.Store()), iter_expr, loop_body, [])
++            self.statements.append(loop)
++            return ast.Name(done_var, ast.Load())
++
++        self.statements = []
++        self.variables = []
++        self.variable_counter = itertools.count()
++        self.stack = []
++        self.on_failure = []
++        self.push_format_context()
++
++        top_condition, explanation = self.visit(assert_.test)
++
++        if isinstance(top_condition, ast.Call) and isinstance(top_condition.func, ast.Name) and top_condition.func.id in ['all', 'any']:
++            top_condition = unroll_allany(top_condition, top_condition.args[0], self.builtin(top_condition.func.id))
++
++        negation = ast.UnaryOp(ast.Not(), top_condition)
++        self.statements.append(ast.If(negation, self.on_failure, []))
++
++        if assert_.msg:
++            assertmsg = self.helper("_format_assertmsg", assert_.msg)
++            explanation = "\n>assert " + explanation
++        else:
++            assertmsg = ast.Str("")
++            explanation = "assert " + explanation
++
++        template = ast.BinOp(assertmsg, ast.Add(), ast.Str(explanation))
++        msg = self.pop_format_context(template)
++        fmt = self.helper("_format_explanation", msg)
++        err_name = ast.Name("AssertionError", ast.Load())
++        exc = ast_Call(err_name, [fmt], [])
++
++        if sys.version_info[0] >= 3:
++            raise_ = ast.Raise(exc, None)
++        else:
++            raise_ = ast.Raise(exc, None, None)
++
++        self.on_failure.append(raise_)
++
++        if self.variables:
++            variables = [ast.Name(name, ast.Store()) for name in self.variables]
++            clear = ast.Assign(variables, _NameConstant(None))
++            self.statements.append(clear)
++
++        for stmt in self.statements:
++            set_location(stmt, assert_.lineno, assert_.col_offset)
++
++        return self.statements
+ 
+     def visit_BoolOp(self, boolop):
+         res_var = self.variable()
+2024-07-03 02:44:33,719 - INFO - Eval script for pytest-dev__pytest-5103 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_137648/model_name_managed_by_server/pytest-dev__pytest-5103/patch.diff, now applying to container...
+2024-07-03 02:44:43,075 - INFO - Test output for pytest-dev__pytest-5103 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_137648/model_name_managed_by_server/pytest-dev__pytest-5103/test_output.txt
+2024-07-03 02:44:43,133 - INFO - Git diff after:
+diff --git a/src/_pytest/assertion/rewrite.py b/src/_pytest/assertion/rewrite.py
+index 2903b8995..afd812d81 100644
+--- a/src/_pytest/assertion/rewrite.py
++++ b/src/_pytest/assertion/rewrite.py
+@@ -811,58 +811,76 @@ class AssertionRewriter(ast.NodeVisitor):
+         res = self.assign(node)
+         return res, self.explanation_param(self.display(res))
+ 
+-    def visit_Assert(self, assert_):
+-        """Return the AST statements to replace the ast.Assert instance.
+-
+-        This rewrites the test of an assertion to provide
+-        intermediate values and replace it with an if statement which
+-        raises an assertion error with a detailed explanation in case
+-        the expression is false.
+-
+-        """
+-        if isinstance(assert_.test, ast.Tuple) and len(assert_.test.elts) >= 1:
+-            from _pytest.warning_types import PytestAssertRewriteWarning
+-            import warnings
+-
+-            warnings.warn_explicit(
+-                PytestAssertRewriteWarning(
+-                    "assertion is always true, perhaps remove parentheses?"
+-                ),
+-                category=None,
+-                filename=str(self.module_path),
+-                lineno=assert_.lineno,
+-            )
+-
+         self.statements = []
+         self.variables = []
+         self.variable_counter = itertools.count()
+         self.stack = []
+         self.on_failure = []
+         self.push_format_context()
++        class AssertionRewriter(ast.NodeVisitor):
++            def unroll_allany(condition, iter_expr, func):
++                iter_var = self.variable()
++                iter_expr, iter_expl = self.visit(iter_expr)
++                done_var = self.variable()
++                self.statements.append(ast.Assign([ast.Name(done_var, ast.Store())], ast.NameConstant(False)))
++                loop_body = []
++                elem_var = self.variable()
++                elem_cond_var = self.variable()
++                comp_var = self.variable()
++                loop_body.append(ast.Assign([ast.Name(elem_var, ast.Store())], ast.Subscript(iter_expr, ast.Index(ast.Num(0)), ast.Load())))
++                loop_body.append(ast.Assign([ast.Name(elem_cond_var, ast.Store())], func(ast.Name(elem_var, ast.Load()))))
++                loop_body.append(ast.Assign([ast.Name(done_var, ast.Store())], elem_cond_var))
++                loop_body.append(ast.If(ast.UnaryOp(ast.Not(), ast.Name(done_var, ast.Load())), [ast.Break()], []))
++                loop_body.append(ast.AugAssign(iter_expr, ast.Sub, ast.Num(1)))
++                loop = ast.For(ast.Name(comp_var, ast.Store()), iter_expr, loop_body, [])
++                self.statements.append(loop)
++                return ast.Name(done_var, ast.Load())
+         # Rewrite assert into a bunch of statements.
+-        top_condition, explanation = self.visit(assert_.test)
+-        # If in a test module, check if directly asserting None, in order to warn [Issue #3191]
+-        if self.module_path is not None:
+-            self.statements.append(
+-                self.warn_about_none_ast(
+-                    top_condition, module_path=self.module_path, lineno=assert_.lineno
+-                )
++    top_condition, explanation = self.visit(assert_.test)
++    # If in a test module, check if directly asserting None, in order to warn [Issue #3191]
++    if self.module_path is not None:
++        self.statements.append(
++            self.warn_about_none_ast(
++                top_condition, module_path=self.module_path, lineno=assert_.lineno
+             )
+-        # Create failure message.
+-        body = self.on_failure
+-        negation = ast.UnaryOp(ast.Not(), top_condition)
+-        self.statements.append(ast.If(negation, body, []))
+-        if assert_.msg:
+-            assertmsg = self.helper("_format_assertmsg", assert_.msg)
+-            explanation = "\n>assert " + explanation
+-        else:
+-            assertmsg = ast.Str("")
+-            explanation = "assert " + explanation
+-        template = ast.BinOp(assertmsg, ast.Add(), ast.Str(explanation))
+-        msg = self.pop_format_context(template)
+-        fmt = self.helper("_format_explanation", msg)
+-        err_name = ast.Name("AssertionError", ast.Load())
+-        exc = ast_Call(err_name, [fmt], [])
++        )
++    # Create failure message.
++    body = self.on_failure
++
++    def unroll_allany(condition, iter_expr, func):
++        iter_var = self.variable()
++        iter_expr, iter_expl = self.visit(iter_expr)
++        done_var = self.variable()
++        self.statements.append(ast.Assign([ast.Name(done_var, ast.Store())], ast.NameConstant(False)))
++        loop_body = []
++        elem_var = self.variable()
++        elem_cond_var = self.variable()
++        comp_var = self.variable()
++        loop_body.append(ast.Assign([ast.Name(elem_var, ast.Store())], ast.Subscript(iter_expr, ast.Index(ast.Num(0)), ast.Load())))
++        loop_body.append(ast.Assign([ast.Name(elem_cond_var, ast.Store())], func(ast.Name(elem_var, ast.Load()))))
++        loop_body.append(ast.Assign([ast.Name(done_var, ast.Store())], elem_cond_var))
++        loop_body.append(ast.If(ast.UnaryOp(ast.Not(), ast.Name(done_var, ast.Load())), [ast.Break()], []))
++        loop_body.append(ast.AugAssign(iter_expr, ast.Sub, ast.Num(1)))
++        loop = ast.For(ast.Name(comp_var, ast.Store()), iter_expr, loop_body, [])
++        self.statements.append(loop)
++        return ast.Name(done_var, ast.Load())
++
++    if isinstance(top_condition, ast.Call) and isinstance(top_condition.func, ast.Name) and top_condition.func.id in ['all', 'any']:
++        top_condition = unroll_allany(top_condition, top_condition.args[0], self.builtin(top_condition.func.id))
++
++    negation = ast.UnaryOp(ast.Not(), top_condition)
++    self.statements.append(ast.If(negation, body, []))
++    if assert_.msg:
++        assertmsg = self.helper("_format_assertmsg", assert_.msg)
++        explanation = "\n>assert " + explanation
++    else:
++        assertmsg = ast.Str("")
++        explanation = "assert " + explanation
++    template = ast.BinOp(assertmsg, ast.Add(), ast.Str(explanation))
++    msg = self.pop_format_context(template)
++    fmt = self.helper("_format_explanation", msg)
++    err_name = ast.Name("AssertionError", ast.Load())
++    exc = ast_Call(err_name, [fmt], [])
+         if sys.version_info[0] >= 3:
+             raise_ = ast.Raise(exc, None)
+         else:
+@@ -905,15 +923,69 @@ warn_explicit(
+         ).body
+         return ast.If(val_is_none, send_warning, [])
+ 
+-    def visit_Name(self, name):
+-        # Display the repr of the name if it's a local variable or
+-        # _should_repr_global_name() thinks it's acceptable.
+-        locs = ast_Call(self.builtin("locals"), [], [])
+-        inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])
+-        dorepr = self.helper("_should_repr_global_name", name)
+-        test = ast.BoolOp(ast.Or(), [inlocs, dorepr])
+-        expr = ast.IfExp(test, self.display(name), ast.Str(name.id))
+-        return name, self.explanation_param(expr)
++    def visit_Assert(self, assert_):
++        def unroll_allany(condition, iter_expr, func):
++            iter_var = self.variable()
++            iter_expr, iter_expl = self.visit(iter_expr)
++            done_var = self.variable()
++            self.statements.append(ast.Assign([ast.Name(done_var, ast.Store())], ast.NameConstant(False)))
++            loop_body = []
++            elem_var = self.variable()
++            elem_cond_var = self.variable()
++            comp_var = self.variable()
++            loop_body.append(ast.Assign([ast.Name(elem_var, ast.Store())], ast.Subscript(iter_expr, ast.Index(ast.Num(0)), ast.Load())))
++            loop_body.append(ast.Assign([ast.Name(elem_cond_var, ast.Store())], func(ast.Name(elem_var, ast.Load()))))
++            loop_body.append(ast.Assign([ast.Name(done_var, ast.Store())], elem_cond_var))
++            loop_body.append(ast.If(ast.UnaryOp(ast.Not(), ast.Name(done_var, ast.Load())), [ast.Break()], []))
++            loop_body.append(ast.AugAssign(iter_expr, ast.Sub, ast.Num(1)))
++            loop = ast.For(ast.Name(comp_var, ast.Store()), iter_expr, loop_body, [])
++            self.statements.append(loop)
++            return ast.Name(done_var, ast.Load())
++
++        self.statements = []
++        self.variables = []
++        self.variable_counter = itertools.count()
++        self.stack = []
++        self.on_failure = []
++        self.push_format_context()
++
++        top_condition, explanation = self.visit(assert_.test)
++
++        if isinstance(top_condition, ast.Call) and isinstance(top_condition.func, ast.Name) and top_condition.func.id in ['all', 'any']:
++            top_condition = unroll_allany(top_condition, top_condition.args[0], self.builtin(top_condition.func.id))
++
++        negation = ast.UnaryOp(ast.Not(), top_condition)
++        self.statements.append(ast.If(negation, self.on_failure, []))
++
++        if assert_.msg:
++            assertmsg = self.helper("_format_assertmsg", assert_.msg)
++            explanation = "\n>assert " + explanation
++        else:
++            assertmsg = ast.Str("")
++            explanation = "assert " + explanation
++
++        template = ast.BinOp(assertmsg, ast.Add(), ast.Str(explanation))
++        msg = self.pop_format_context(template)
++        fmt = self.helper("_format_explanation", msg)
++        err_name = ast.Name("AssertionError", ast.Load())
++        exc = ast_Call(err_name, [fmt], [])
++
++        if sys.version_info[0] >= 3:
++            raise_ = ast.Raise(exc, None)
++        else:
++            raise_ = ast.Raise(exc, None, None)
++
++        self.on_failure.append(raise_)
++
++        if self.variables:
++            variables = [ast.Name(name, ast.Store()) for name in self.variables]
++            clear = ast.Assign(variables, _NameConstant(None))
++            self.statements.append(clear)
++
++        for stmt in self.statements:
++            set_location(stmt, assert_.lineno, assert_.col_offset)
++
++        return self.statements
+ 
+     def visit_BoolOp(self, boolop):
+         res_var = self.variable()
+2024-07-03 02:44:43,133 - INFO - Grading answer for pytest-dev__pytest-5103...
+2024-07-03 02:44:43,134 - INFO - report: {'pytest-dev__pytest-5103': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['testing/test_assertrewrite.py::TestAssertionRewrite::test_unroll_expression']}, 'PASS_TO_PASS': {'success': [], 'failure': ['testing/test_assertrewrite.py::TestAssertionRewrite::test_place_initial_imports', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_dont_rewrite', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_name', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_dont_rewrite_if_hasattr_fails', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assert_already_has_message', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_boolop', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_short_circuit_evaluation', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_unary_op', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_binary_op', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_boolop_percent', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_call', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_attribute', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_comparisons', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_len', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_custom_reprcompare', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assert_raising_nonzero_in_comparison', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_formatchar', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_custom_repr', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_custom_repr_non_ascii', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_read_pyc', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_dont_rewrite_plugin', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assertion_message', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assertion_message_multiline', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assertion_message_tuple', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assertion_message_expr', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assertion_message_escape', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_assertion_messages_bytes', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_at_operator_issue1290', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_starred_with_side_effect', 'testing/test_assertrewrite.py::TestAssertionRewrite::test_for_loop', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_pycache_is_a_file', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_pycache_is_readonly', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_zipfile', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_readonly', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_dont_write_bytecode', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_orphaned_pyc_file', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_pyc_vs_pyo', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_package', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_translate_newlines', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_package_without__init__py', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_rewrite_warning', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_rewrite_module_imported_from_conftest', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_remember_rewritten_modules', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_rewrite_warning_using_pytest_plugins', 'testing/test_assertrewrite.py::TestRewriteOnImport::test_rewrite_warning_using_pytest_plugins_env_var', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_loader_is_package_false_for_module', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_loader_is_package_true_for_package', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_sys_meta_path_munged', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_write_pyc', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_resources_provider_for_loader', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_reload_is_same', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_reload_reloads', 'testing/test_assertrewrite.py::TestAssertionRewriteHookDetails::test_get_data_support', 'testing/test_assertrewrite.py::test_issue731', 'testing/test_assertrewrite.py::TestIssue925::test_simple_case', 'testing/test_assertrewrite.py::TestIssue925::test_long_case', 'testing/test_assertrewrite.py::TestIssue925::test_many_brackets', 'testing/test_assertrewrite.py::TestIssue2121::test_rewrite_python_files_contain_subdirs', 'testing/test_assertrewrite.py::test_source_mtime_long_long[-1]', 'testing/test_assertrewrite.py::test_source_mtime_long_long[1]', 'testing/test_assertrewrite.py::test_rewrite_infinite_recursion', 'testing/test_assertrewrite.py::TestEarlyRewriteBailout::test_basic', 'testing/test_assertrewrite.py::TestEarlyRewriteBailout::test_pattern_contains_subdirectories', 'testing/test_assertrewrite.py::TestEarlyRewriteBailout::test_cwd_changed']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for pytest-dev__pytest-5103: resolved: False
+2024-07-03 02:44:43,134 - INFO - Attempting to stop container sweb.eval.pytest-dev__pytest-5103.evaluation_137648...
+2024-07-03 02:44:43,350 - INFO - Attempting to remove container sweb.eval.pytest-dev__pytest-5103.evaluation_137648...
+2024-07-03 02:44:43,365 - INFO - Container sweb.eval.pytest-dev__pytest-5103.evaluation_137648 removed.

@@ -1,0 +1,271 @@
+2024-07-03 17:44:40,335 - INFO - Environment image sweb.env.x86_64.c795f4b88616b8462021ed:latest found for sympy__sympy-18087
+Building instance image sweb.eval.x86_64.sympy__sympy-18087:latest for sympy__sympy-18087
+2024-07-03 17:44:40,338 - INFO - Image sweb.eval.x86_64.sympy__sympy-18087:latest already exists, skipping build.
+2024-07-03 17:44:40,338 - INFO - Creating container for sympy__sympy-18087...
+2024-07-03 17:44:43,838 - INFO - Container for sympy__sympy-18087 created: 271b18d4dba47a05644eb75c5c10b2a90a8a542141b4434096d3884ddf3d1d2e
+2024-07-03 17:44:54,322 - INFO - Container for sympy__sympy-18087 started: 271b18d4dba47a05644eb75c5c10b2a90a8a542141b4434096d3884ddf3d1d2e
+2024-07-03 17:44:54,322 - INFO - Intermediate patch for sympy__sympy-18087 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_184412/model_name_managed_by_server/sympy__sympy-18087/patch.diff, now applying to container...
+2024-07-03 17:44:54,749 - INFO - >>>>> Applied Patch:
+Checking patch sympy/simplify/trigsimp.py...
+Applied patch sympy/simplify/trigsimp.py cleanly.
+
+2024-07-03 17:44:55,319 - INFO - Git diff before:
+diff --git a/sympy/simplify/trigsimp.py b/sympy/simplify/trigsimp.py
+index 7ca05f0304..ca92271bad 100644
+--- a/sympy/simplify/trigsimp.py
++++ b/sympy/simplify/trigsimp.py
+@@ -935,9 +935,106 @@ def _trigsimp(expr, deep=False):
+     return expr
+ 
+ 
++import math
++from sympy.simplify.fu import TR10i
++
+ @cacheit
+ def __trigsimp(expr, deep=False):
+     """recursive helper for trigsimp"""
++    from sympy.simplify.simplify import signsimp
++
++    if expr.has(sqrt):
++        expr = TR10i(expr)
++
++    if _trigpat is None:
++        _trigpats()
++    a, b, c, d, matchers_division, matchers_add, \
++    matchers_identity, artifacts = _trigpat
++
++    if expr.is_Mul:
++        # do some simplifications like sin/cos -> tan:
++        if not expr.is_commutative:
++            com, nc = expr.args_cnc()
++            expr = _trigsimp(Mul._from_args(com), deep)*Mul._from_args(nc)
++        else:
++            for i, (pattern, simp, ok1, ok2) in enumerate(matchers_division):
++                if not _dotrig(expr, pattern):
++                    continue
++
++                newexpr = _match_div_rewrite(expr, i)
++                if newexpr is not None:
++                    if newexpr != expr:
++                        expr = newexpr
++                        break
++                    else:
++                        continue
++
++                # use SymPy matching instead
++                res = expr.match(pattern)
++                if res and res.get(c, 0):
++                    if not res[c].is_integer:
++                        ok = ok1.subs(res)
++                        if not ok.is_positive:
++                            continue
++                        ok = ok2.subs(res)
++                        if not ok.is_positive:
++                            continue
++                    # if "a" contains any of trig or hyperbolic funcs with
++                    # argument "b" then skip the simplification
++                    if any(w.args[0] == res[b] for w in res[a].atoms(
++                            TrigonometricFunction, HyperbolicFunction)):
++                        continue
++                    # simplify and finish:
++                    if pattern == a*sqrt(sin(b)**2):
++                        expr = abs(sin(b)).subs(res)
++                    elif pattern == a*sqrt(cos(b)**2):
++                        expr = abs(cos(b)).subs(res)
++                    else:
++                        expr = simp.subs(res)
++                    break  # process below
++
++    if expr.is_Add:
++        args = []
++        for term in expr.args:
++            if not term.is_commutative:
++                com, nc = term.args_cnc()
++                nc = Mul._from_args(nc)
++                term = Mul._from_args(com)
++            else:
++                nc = S.One
++            term = _trigsimp(term, deep)
++            for pattern, result in matchers_identity:
++                res = term.match(pattern)
++                if res is not None:
++                    term = result.subs(res)
++                    break
++            args.append(term*nc)
++        if args != expr.args:
++            expr = Add(*args)
++            expr = min(expr, expand(expr), key=count_ops)
++        if expr.is_Add:
++            for pattern, result in matchers_add:
++                if not _dotrig(expr, pattern):
++                    continue
++                expr = TR10i(expr)
++                if expr.has(HyperbolicFunction):
++                    res = expr.match(pattern)
++                    # if "d" contains any trig or hyperbolic funcs with
++                    # argument "a" or "b" then skip the simplification;
++                    # this isn't perfect -- see tests
++                    if res is None or not (a in res and b in res) or any(
++                        w.args[0] in (res[a], res[b]) for w in res[d].atoms(
++                            TrigonometricFunction, HyperbolicFunction)):
++                        continue
++                    expr = result.subs(res)
++                    break
++
++        # Reduce any lingering artifacts, such as sin(x)**2 changing
++        # to 1-cos(x)**2 when sin(x)**2 was "simpler"
++        for pattern, result, ex in artifacts:
++            if not _dotrig(expr, pattern):
++                continue
++            # Substitute a new wild that excludes
+     from sympy.simplify.fu import TR10i
+ 
+     if _trigpat is None:
+@@ -979,7 +1076,12 @@ def __trigsimp(expr, deep=False):
+                             TrigonometricFunction, HyperbolicFunction)):
+                         continue
+                     # simplify and finish:
+-                    expr = simp.subs(res)
++                    if pattern == a*sqrt(sin(b)**2):
++                        expr = abs(sin(b)).subs(res)
++                    elif pattern == a*sqrt(cos(b)**2):
++                        expr = abs(cos(b)).subs(res)
++                    else:
++                        expr = simp.subs(res)
+                     break  # process below
+ 
+     if expr.is_Add:
+2024-07-03 17:44:55,338 - INFO - Eval script for sympy__sympy-18087 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_184412/model_name_managed_by_server/sympy__sympy-18087/patch.diff, now applying to container...
+2024-07-03 17:45:04,723 - INFO - Test output for sympy__sympy-18087 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_184412/model_name_managed_by_server/sympy__sympy-18087/test_output.txt
+2024-07-03 17:45:04,793 - INFO - Git diff after:
+diff --git a/sympy/simplify/trigsimp.py b/sympy/simplify/trigsimp.py
+index 7ca05f0304..ca92271bad 100644
+--- a/sympy/simplify/trigsimp.py
++++ b/sympy/simplify/trigsimp.py
+@@ -935,9 +935,106 @@ def _trigsimp(expr, deep=False):
+     return expr
+ 
+ 
++import math
++from sympy.simplify.fu import TR10i
++
+ @cacheit
+ def __trigsimp(expr, deep=False):
+     """recursive helper for trigsimp"""
++    from sympy.simplify.simplify import signsimp
++
++    if expr.has(sqrt):
++        expr = TR10i(expr)
++
++    if _trigpat is None:
++        _trigpats()
++    a, b, c, d, matchers_division, matchers_add, \
++    matchers_identity, artifacts = _trigpat
++
++    if expr.is_Mul:
++        # do some simplifications like sin/cos -> tan:
++        if not expr.is_commutative:
++            com, nc = expr.args_cnc()
++            expr = _trigsimp(Mul._from_args(com), deep)*Mul._from_args(nc)
++        else:
++            for i, (pattern, simp, ok1, ok2) in enumerate(matchers_division):
++                if not _dotrig(expr, pattern):
++                    continue
++
++                newexpr = _match_div_rewrite(expr, i)
++                if newexpr is not None:
++                    if newexpr != expr:
++                        expr = newexpr
++                        break
++                    else:
++                        continue
++
++                # use SymPy matching instead
++                res = expr.match(pattern)
++                if res and res.get(c, 0):
++                    if not res[c].is_integer:
++                        ok = ok1.subs(res)
++                        if not ok.is_positive:
++                            continue
++                        ok = ok2.subs(res)
++                        if not ok.is_positive:
++                            continue
++                    # if "a" contains any of trig or hyperbolic funcs with
++                    # argument "b" then skip the simplification
++                    if any(w.args[0] == res[b] for w in res[a].atoms(
++                            TrigonometricFunction, HyperbolicFunction)):
++                        continue
++                    # simplify and finish:
++                    if pattern == a*sqrt(sin(b)**2):
++                        expr = abs(sin(b)).subs(res)
++                    elif pattern == a*sqrt(cos(b)**2):
++                        expr = abs(cos(b)).subs(res)
++                    else:
++                        expr = simp.subs(res)
++                    break  # process below
++
++    if expr.is_Add:
++        args = []
++        for term in expr.args:
++            if not term.is_commutative:
++                com, nc = term.args_cnc()
++                nc = Mul._from_args(nc)
++                term = Mul._from_args(com)
++            else:
++                nc = S.One
++            term = _trigsimp(term, deep)
++            for pattern, result in matchers_identity:
++                res = term.match(pattern)
++                if res is not None:
++                    term = result.subs(res)
++                    break
++            args.append(term*nc)
++        if args != expr.args:
++            expr = Add(*args)
++            expr = min(expr, expand(expr), key=count_ops)
++        if expr.is_Add:
++            for pattern, result in matchers_add:
++                if not _dotrig(expr, pattern):
++                    continue
++                expr = TR10i(expr)
++                if expr.has(HyperbolicFunction):
++                    res = expr.match(pattern)
++                    # if "d" contains any trig or hyperbolic funcs with
++                    # argument "a" or "b" then skip the simplification;
++                    # this isn't perfect -- see tests
++                    if res is None or not (a in res and b in res) or any(
++                        w.args[0] in (res[a], res[b]) for w in res[d].atoms(
++                            TrigonometricFunction, HyperbolicFunction)):
++                        continue
++                    expr = result.subs(res)
++                    break
++
++        # Reduce any lingering artifacts, such as sin(x)**2 changing
++        # to 1-cos(x)**2 when sin(x)**2 was "simpler"
++        for pattern, result, ex in artifacts:
++            if not _dotrig(expr, pattern):
++                continue
++            # Substitute a new wild that excludes
+     from sympy.simplify.fu import TR10i
+ 
+     if _trigpat is None:
+@@ -979,7 +1076,12 @@ def __trigsimp(expr, deep=False):
+                             TrigonometricFunction, HyperbolicFunction)):
+                         continue
+                     # simplify and finish:
+-                    expr = simp.subs(res)
++                    if pattern == a*sqrt(sin(b)**2):
++                        expr = abs(sin(b)).subs(res)
++                    elif pattern == a*sqrt(cos(b)**2):
++                        expr = abs(cos(b)).subs(res)
++                    else:
++                        expr = simp.subs(res)
+                     break  # process below
+ 
+     if expr.is_Add:
+2024-07-03 17:45:04,801 - INFO - Grading answer for sympy__sympy-18087...
+2024-07-03 17:45:04,802 - INFO - report: {'sympy__sympy-18087': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_Factors', 'test_fu']}, 'PASS_TO_PASS': {'success': [], 'failure': ['test_decompose_power', 'test_Term', 'test_gcd_terms', 'test_factor_terms', 'test_xreplace', 'test_factor_nc', 'test_issue_6360', 'test_issue_7903', 'test_issue_8263', 'test_monotonic_sign', 'test_TR1', 'test_TR2', 'test_TR2i', 'test_TR3', 'test__TR56', 'test_TR5', 'test_TR6', 'test_TR7', 'test_TR8', 'test_TR9', 'test_TR10', 'test_TR10i', 'test_TR11', 'test_TR12', 'test_TR13', 'test_L', 'test_objective', 'test_process_common_addends', 'test_trig_split', 'test_TRmorrie', 'test_TRpower', 'test_hyper_as_trig', 'test_TR12i', 'test_TR14', 'test_TR15_16_17']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for sympy__sympy-18087: resolved: False
+2024-07-03 17:45:04,803 - INFO - Attempting to stop container sweb.eval.sympy__sympy-18087.evaluation_184412...
+2024-07-03 17:45:06,535 - INFO - Attempting to remove container sweb.eval.sympy__sympy-18087.evaluation_184412...
+2024-07-03 17:45:07,028 - INFO - Container sweb.eval.sympy__sympy-18087.evaluation_184412 removed.

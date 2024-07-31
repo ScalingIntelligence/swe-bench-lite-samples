@@ -1,0 +1,125 @@
+2024-07-03 17:32:12,310 - INFO - Environment image sweb.env.x86_64.c70909fdac4897d1c685df:latest found for django__django-16910
+Building instance image sweb.eval.x86_64.django__django-16910:latest for django__django-16910
+2024-07-03 17:32:12,311 - INFO - Image sweb.eval.x86_64.django__django-16910:latest already exists, skipping build.
+2024-07-03 17:32:12,311 - INFO - Creating container for django__django-16910...
+2024-07-03 17:32:13,762 - INFO - Container for django__django-16910 created: e34370fd03ac2251a1f787191b971a0e1ca1521b919cee249b1b88e788e9215a
+2024-07-03 17:32:28,628 - INFO - Container for django__django-16910 started: e34370fd03ac2251a1f787191b971a0e1ca1521b919cee249b1b88e788e9215a
+2024-07-03 17:32:28,629 - INFO - Intermediate patch for django__django-16910 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_183360/model_name_managed_by_server/django__django-16910/patch.diff, now applying to container...
+2024-07-03 17:32:29,554 - INFO - >>>>> Applied Patch:
+Checking patch django/db/models/sql/query.py...
+Applied patch django/db/models/sql/query.py cleanly.
+
+2024-07-03 17:32:30,655 - INFO - Git diff before:
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 781dfd5499..24ea53d5b8 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -811,6 +811,29 @@ class Query(BaseExpression):
+             return self._get_defer_select_mask(opts, mask)
+         return self._get_only_select_mask(opts, mask)
+ 
++    def _get_only_select_mask(self, opts, mask):
++        """
++        Compute the select mask for the 'only' fields, considering reverse
++        OneToOne relations.
++        """
++        select_mask = {}
++        for field_name, sub_mask in mask.items():
++            parts = field_name.split(LOOKUP_SEP)
++            current_opts = opts
++            current_mask = select_mask
++            for part in parts[:-1]:
++                if part in current_opts.get_fields(include_parents=True, include_hidden=True):
++                    field = current_opts.get_field(part)
++                    if field.is_relation and field.one_to_one:
++                        current_opts = field.related_model._meta
++                        current_mask = current_mask.setdefault(part, {})
++                    else:
++                        break
++                else:
++                    break
++            current_mask[parts[-1]] = self._get_only_select_mask(current_opts, sub_mask)
++        return select_mask
++
+     def table_alias(self, table_name, create=False, filtered_relation=None):
+         """
+         Return a table alias for the given table_name and whether this is a
+@@ -1861,6 +1884,17 @@ class Query(BaseExpression):
+             reuse = can_reuse if join.m2m else None
+             alias = self.join(connection, reuse=reuse)
+             joins.append(alias)
++        # Adjust joins for reverse OneToOne relations when using only() and select_related()
++        if final_field.is_relation and final_field.one_to_one and not join.direct:
++            for join in path:
++                if join.to_opts == final_field.related_model._meta:
++                    for field_name in self.values_select:
++                        if field_name.startswith(final_field.related_name + LOOKUP_SEP):
++                            field_name = field_name.split(LOOKUP_SEP, 1)[1]
++                            if field_name not in join.to_opts.get_all_field_names():
++                                path.remove(join)
++                                joins.pop()
++                                break
+         return JoinInfo(final_field, targets, opts, joins, path, final_transformer)
+ 
+     def trim_joins(self, targets, joins, path):
+2024-07-03 17:32:30,656 - INFO - Eval script for django__django-16910 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_183360/model_name_managed_by_server/django__django-16910/patch.diff, now applying to container...
+2024-07-03 17:32:47,332 - INFO - Test output for django__django-16910 written to /scratch/rse-swe-bench/unit_test_logs/evaluation_183360/model_name_managed_by_server/django__django-16910/test_output.txt
+2024-07-03 17:32:47,463 - INFO - Git diff after:
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 781dfd5499..24ea53d5b8 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -811,6 +811,29 @@ class Query(BaseExpression):
+             return self._get_defer_select_mask(opts, mask)
+         return self._get_only_select_mask(opts, mask)
+ 
++    def _get_only_select_mask(self, opts, mask):
++        """
++        Compute the select mask for the 'only' fields, considering reverse
++        OneToOne relations.
++        """
++        select_mask = {}
++        for field_name, sub_mask in mask.items():
++            parts = field_name.split(LOOKUP_SEP)
++            current_opts = opts
++            current_mask = select_mask
++            for part in parts[:-1]:
++                if part in current_opts.get_fields(include_parents=True, include_hidden=True):
++                    field = current_opts.get_field(part)
++                    if field.is_relation and field.one_to_one:
++                        current_opts = field.related_model._meta
++                        current_mask = current_mask.setdefault(part, {})
++                    else:
++                        break
++                else:
++                    break
++            current_mask[parts[-1]] = self._get_only_select_mask(current_opts, sub_mask)
++        return select_mask
++
+     def table_alias(self, table_name, create=False, filtered_relation=None):
+         """
+         Return a table alias for the given table_name and whether this is a
+@@ -1861,6 +1884,17 @@ class Query(BaseExpression):
+             reuse = can_reuse if join.m2m else None
+             alias = self.join(connection, reuse=reuse)
+             joins.append(alias)
++        # Adjust joins for reverse OneToOne relations when using only() and select_related()
++        if final_field.is_relation and final_field.one_to_one and not join.direct:
++            for join in path:
++                if join.to_opts == final_field.related_model._meta:
++                    for field_name in self.values_select:
++                        if field_name.startswith(final_field.related_name + LOOKUP_SEP):
++                            field_name = field_name.split(LOOKUP_SEP, 1)[1]
++                            if field_name not in join.to_opts.get_all_field_names():
++                                path.remove(join)
++                                joins.pop()
++                                break
+         return JoinInfo(final_field, targets, opts, joins, path, final_transformer)
+ 
+     def trim_joins(self, targets, joins, path):
+2024-07-03 17:32:47,463 - INFO - Grading answer for django__django-16910...
+2024-07-03 17:32:47,469 - INFO - report: {'django__django-16910': {'patch_is_None': False, 'patch_exists': True, 'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': ['test_inheritance_deferred2 (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_inheritance_deferred2)', 'test_reverse_one_to_one_relations (defer_regress.tests.DeferRegressionTest.test_reverse_one_to_one_relations)']}, 'PASS_TO_PASS': {'success': ['test_reverse_related_validation (select_related_onetoone.tests.ReverseSelectRelatedValidationTests.test_reverse_related_validation)', 'test_reverse_related_validation_with_filtered_relation (select_related_onetoone.tests.ReverseSelectRelatedValidationTests.test_reverse_related_validation_with_filtered_relation)', 'test_back_and_forward (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_back_and_forward)', 'test_basic (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_basic)', 'test_follow_from_child_class (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_follow_from_child_class)', 'test_follow_inheritance (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_follow_inheritance)', 'test_follow_next_level (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_follow_next_level)', 'test_follow_two (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_follow_two)', 'test_follow_two_next_level (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_follow_two_next_level)', 'test_forward_and_back (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_forward_and_back)', 'Ticket #13839: select_related() should NOT cache None', 'test_multiinheritance_two_subclasses (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_multiinheritance_two_subclasses)', 'test_multiple_subclass (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_multiple_subclass)', 'test_not_followed_by_default (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_not_followed_by_default)', 'test_nullable_relation (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_nullable_relation)', 'test_onetoone_with_subclass (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_onetoone_with_subclass)', 'test_onetoone_with_two_subclasses (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_onetoone_with_two_subclasses)', 'test_parent_only (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_parent_only)', 'test_self_relation (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_self_relation)', 'test_defer_many_to_many_ignored (defer_regress.tests.DeferRegressionTest.test_defer_many_to_many_ignored)', 'test_defer_reverse_many_to_many_ignored (defer_regress.tests.DeferRegressionTest.test_defer_reverse_many_to_many_ignored)', 'test_resolve_columns (defer_regress.tests.DeferRegressionTest.test_resolve_columns)', 'test_ticket_23270 (defer_regress.tests.DeferRegressionTest.test_ticket_23270)'], 'failure': ['test_delete_defered_model (defer_regress.tests.DeferDeletionSignalsTests.test_delete_defered_model)', 'test_delete_defered_proxy_model (defer_regress.tests.DeferDeletionSignalsTests.test_delete_defered_proxy_model)', 'test_inheritance_deferred (select_related_onetoone.tests.ReverseSelectRelatedTestCase.test_inheritance_deferred)', 'test_basic (defer_regress.tests.DeferRegressionTest.test_basic)', 'test_common_model_different_mask (defer_regress.tests.DeferRegressionTest.test_common_model_different_mask)', 'test_defer_annotate_select_related (defer_regress.tests.DeferRegressionTest.test_defer_annotate_select_related)', 'test_defer_with_select_related (defer_regress.tests.DeferRegressionTest.test_defer_with_select_related)', 'test_only_and_defer_usage_on_proxy_models (defer_regress.tests.DeferRegressionTest.test_only_and_defer_usage_on_proxy_models)', 'test_only_many_to_many_ignored (defer_regress.tests.DeferRegressionTest.test_only_many_to_many_ignored)', 'test_only_reverse_many_to_many_ignored (defer_regress.tests.DeferRegressionTest.test_only_reverse_many_to_many_ignored)', 'test_only_with_select_related (defer_regress.tests.DeferRegressionTest.test_only_with_select_related)', 'test_proxy_model_defer_with_select_related (defer_regress.tests.DeferRegressionTest.test_proxy_model_defer_with_select_related)', 'test_ticket_16409 (defer_regress.tests.DeferRegressionTest.test_ticket_16409)']}, 'FAIL_TO_FAIL': {'success': [], 'failure': []}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}}
+Result for django__django-16910: resolved: False
+2024-07-03 17:32:47,469 - INFO - Attempting to stop container sweb.eval.django__django-16910.evaluation_183360...
+2024-07-03 17:32:49,119 - INFO - Attempting to remove container sweb.eval.django__django-16910.evaluation_183360...
+2024-07-03 17:32:49,391 - INFO - Container sweb.eval.django__django-16910.evaluation_183360 removed.
